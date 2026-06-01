@@ -1,0 +1,14 @@
+<!--
+  Paste into Supabase Dashboard → Authentication → Email Templates → Magic Link
+
+  Supabase uses ONE template for signInWithOtp. It defaults to {{ .ConfirmationURL }}
+  only — you must add {{ .Token }} or users never see the 6-digit code.
+-->
+<h2>Sign in to Readr</h2>
+
+<p>Enter this code in the app:</p>
+<p style="font-size: 28px; font-weight: bold; letter-spacing: 4px;">{{ .Token }}</p>
+
+<p style="color: #666; font-size: 14px;">
+  This code expires in a few minutes. If you didn't request it, you can ignore this email.
+</p>

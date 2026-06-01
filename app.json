@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Readr",
+    "slug": "readr",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "readr",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.readr.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#000000"
+      },
+      "package": "com.readr.app"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      "expo-secure-store",
+      "expo-av",
+      "expo-web-browser"
+    ],
+    "assetBundlePatterns": [
+      "assets/**/*"
+    ]
+  }
+}
