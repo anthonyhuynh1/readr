@@ -20,18 +20,21 @@ export interface ResolvedAudioSource {
   headers?: Record<string, string>;
 }
 
-/** Resolve playable audio URI — Storage when configured, bundled asset as fallback. */
+/** Resolve playable audio URI — Storage when configured, bundled demo for ch.1 only. */
 export async function resolveChapterAudioSource(
   chapterSlug: string,
   audioPath?: string,
+  chapterIndex = 1,
 ): Promise<ResolvedAudioSource | null> {
   if (hasSupabaseConfig() && audioPath) {
     return { uri: resolveChapterAudioStorageUrl(audioPath) };
   }
 
-  const bundled = await getBundledAudioUri();
-  if (bundled) {
-    return { uri: bundled };
+  if (chapterIndex === 1) {
+    const bundled = await getBundledAudioUri();
+    if (bundled) {
+      return { uri: bundled };
+    }
   }
 
   return null;

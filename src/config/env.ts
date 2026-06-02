@@ -20,6 +20,23 @@ export function hasSupabaseConfig(): boolean {
   return Boolean(env.supabaseUrl && env.supabaseAnonKey);
 }
 
+export type SupabaseClientKeyKind =
+  | 'publishable'
+  | 'legacy'
+  | 'secret'
+  | 'missing'
+  | 'unknown';
+
+/** Which API key shape is bundled — useful when debugging auth failures. */
+export function getSupabaseClientKeyKind(): SupabaseClientKeyKind {
+  const key = env.supabaseAnonKey;
+  if (!key) return 'missing';
+  if (key.startsWith('sb_publishable_')) return 'publishable';
+  if (key.startsWith('sb_secret_')) return 'secret';
+  if (key.startsWith('eyJ')) return 'legacy';
+  return 'unknown';
+}
+
 /** True when the app should prefer Supabase over local mock fallbacks. */
 export function isBackendConfigured(): boolean {
   return hasSupabaseConfig();

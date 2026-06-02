@@ -1,8 +1,9 @@
 import type { Chapter, Sentence, WordTimestamp } from '../types';
 import { chapterToSyncAsset, hashSyncAsset } from './syncAsset';
 
-/** LibriVox intro offset applied when real audio is wired (ms). */
+/** LibriVox intro skip when using full chapter recordings (ms). Demo MP3 uses 0. */
 export const DEFAULT_LIBRIVOX_OFFSET_MS = 18_000;
+export const DEMO_CHAPTER_AUDIO_OFFSET_MS = 0;
 
 function buildSentence(
   sentenceId: string,
@@ -122,7 +123,7 @@ export function buildChapterFromDbSentences(
 
 export function buildChapterFromParagraphs(input: BuildChapterInput): Chapter {
   const sentences: Sentence[] = [];
-  let ms = input.audioOffsetMs;
+  let ms = 0;
   let globalWordIndex = 0;
 
   input.paragraphs.forEach((text, i) => {

@@ -87,6 +87,11 @@ export class ChapterAudioPlayer {
       this.visualDurationMs = visualDuration;
       this.onDuration(visualDuration);
     }
+
+    if (this.audioOffsetMs > 0) {
+      await sound.setPositionAsync(this.audioOffsetMs);
+      this.onVisualPosition(0);
+    }
   }
 
   async play(): Promise<void> {

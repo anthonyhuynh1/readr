@@ -13,10 +13,14 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest run",
-    "ci": "npm run typecheck && npm run lint && npm run test && npm run validate:mock-book",
+    "ci": "npm run typecheck && npm run lint && npm run test && npm run validate:mock-book && npm run validate:sync",
     "seed:supabase": "tsx scripts/seed/supabaseSeed.ts",
     "supabase:check": "tsx scripts/supabase/checkSetup.ts",
-    "ingest:gatsby": "tsx scripts/ingest/runGatsby.ts",
+    "supabase:check-env": "tsx scripts/supabase/checkEnvKeys.ts",
+    "fetch:gatsby-audio": "tsx scripts/ingest/fetchGatsbyAudio.ts",
+    "align:extract": "tsx scripts/alignment/extractChapterAlignInput.ts",
+    "validate:sync": "tsx scripts/alignment/validateSyncAsset.ts",
+    "repair:sync": "tsx scripts/alignment/repairSyncAsset.ts",
     "validate:mock-book": "tsx scripts/validate/mockBookSchema.ts"
   },
   "dependencies": {

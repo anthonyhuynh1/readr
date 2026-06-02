@@ -143,6 +143,19 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const { data: ch1 } = await db
+    .from('chapters')
+    .select('slug, audio_path, sync_hash')
+    .eq('book_slug', 'the-great-gatsby')
+    .eq('chapter_index', 1)
+    .maybeSingle();
+
+  if (ch1?.audio_path && ch1.sync_hash) {
+    console.log('✓ Gatsby ch.1 has audio + sync metadata (enable Audio in Profile dev toggles)');
+  } else {
+    console.log('○ Gatsby ch.1 audio not seeded — re-run npm run seed:supabase for karaoke demo');
+  }
+
   console.log('\n✓ Setup looks good. Restart the app to read from Supabase.');
 }
 

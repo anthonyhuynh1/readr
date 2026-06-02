@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../supabase/client';
 import { getAuthRedirectUrl } from './redirect';
+import { isValidEmailOtp } from '../../utils/emailOtp';
 
 const DEV_GUEST_KEY = 'readr.auth.dev_guest';
 
@@ -32,6 +33,13 @@ function formatAuthError(message: string): string {
   }
   if (lower.includes('only request this after')) {
     return 'Please wait a minute before requesting another code.';
+  }
+  if (lower.includes('legacy api keys are disabled')) {
+    return (
+      'Supabase rejected the app API key (legacy keys are disabled). ' +
+      'In .env set EXPO_PUBLIC_SUPABASE_ANON_KEY to your Publishable key (sb_publishable_…), ' +
+      'then restart Expo with cache clear: npx expo start -c'
+    );
   }
   return message;
 }
@@ -88,7 +96,7 @@ export async function requestEmailOtp(email: string): Promise<AuthResult> {
 
   return {
     ok: true,
-    message: `We sent a 6-digit code to ${email}. Enter it below to sign in.`,
+    message: `We sent a sign-in code to ${email}. Enter it below.`,
   };
 }
 
@@ -100,8 +108,8 @@ export async function verifyEmailOtp(email: string, token: string): Promise<Auth
   }
 
   const code = token.trim();
-  if (!/^\d{6}$/.test(code)) {
-    return { ok: false, message: 'Enter the 6-digit code from your email.' };
+  if (!isValidEmailOtp(code)) {
+    return { ok: false, message: 'Enter the full numeric code from your email (usually 6–8 digits).' };
   }
 
   const { error } = await client.auth.verifyOtp({
@@ -121,5 +129,7 @@ export async function signOut(): Promise<void> {
   await clearDevGuestSession();
   const client = getSupabaseClient();
   if (!client) return;
-  await client.auth.signOut();
+  // Local scope clears the session immediately; avoid blocking on network revoke.
+  await client.auth.signOut({ scope: 'local' });
+  void client.auth.signOut({ scope: 'global' }).catch(() => {});
 }

@@ -90,6 +90,9 @@ export function BookmarksPanel({ visible, onClose }: BookmarksPanelProps) {
                             }}
                           >
                             <Text style={styles.bookmarkQuote}>{bookmark.text_preview}</Text>
+                            {bookmark.pending_sync ? (
+                              <Text style={styles.pendingSync}>Syncing…</Text>
+                            ) : null}
                           </Pressable>
                           <Pressable
                             onPress={() => void removeBookmark(bookmark.id)}
@@ -201,6 +204,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: theme.colors.trueBlack,
+  },
+  pendingSync: {
+    marginTop: 4,
+    fontSize: 11,
+    color: theme.colors.brandOrange,
   },
   removeText: {
     fontSize: 22,

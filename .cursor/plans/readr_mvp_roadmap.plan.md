@@ -19,13 +19,13 @@ todos:
     status: completed
   - id: p2-supabase-auth
     content: "Phase 2 — Custom SMTP + OTP template ({{ .Token }}); test sign-in without dev guest"
-    status: in_progress
+    status: completed
   - id: p2-bookmarks-e2e
     content: "Phase 2 — E2E bookmarks + reading progress with real signed-in user"
-    status: in_progress
+    status: completed
   - id: p3-audio-ch1
     content: "Phase 3 — Demo audio on Gatsby ch.1 via Supabase Storage; verify karaoke"
-    status: pending
+    status: in_progress
   - id: p4-unavailable-ux
     content: "Phase 4 — ReadUnavailableScreen (dynamic copy, SE link, readable suggestions)"
     status: completed

@@ -20,19 +20,6 @@ function AppShell() {
     );
   }
 
-  if (!isSignedIn) {
-    return (
-      <>
-        <StatusBar
-          barStyle="dark-content"
-          backgroundColor={theme.colors.surface}
-          translucent={false}
-        />
-        <AuthScreen />
-      </>
-    );
-  }
-
   return (
     <>
       <StatusBar
@@ -40,8 +27,8 @@ function AppShell() {
         backgroundColor={theme.colors.surface}
         translucent={false}
       />
-      <NavigationContainer>
-        <RootNavigator />
+      <NavigationContainer key={isSignedIn ? 'app' : 'auth'}>
+        {isSignedIn ? <RootNavigator /> : <AuthScreen />}
       </NavigationContainer>
     </>
   );

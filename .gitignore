@@ -12,4 +12,5 @@ web-build/
 .env
 .env.*
 !.env.example
-tmp/
+# Large LibriVox downloads — run npm run fetch:gatsby-audio
+assets/audio/gatsby-ch1-librivox.mp3

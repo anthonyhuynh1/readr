@@ -1,53 +1,37 @@
-# WhisperX alignment pipeline (scaffold)
+# WhisperX alignment pipeline
 
-WhisperX is **not** invoked by the mobile app. It is an offline batch step that
-produces canonical chapter sync JSON assets uploaded to Supabase Storage.
+WhisperX runs **offline on GPU** (Colab / RunPod). It produces `ChapterSyncAsset` JSON
+uploaded to Supabase Storage at seed time.
 
-## Purpose
-
-Given:
-
-- LibriVox MP3 audio for a chapter
-- Standard Ebooks sentence text (already ingested)
-- Measured `audio_offset_ms` (LibriVox intro silence)
-
-Produce:
-
-- `assets/sync/{book_slug}/{chapter}.json` matching `ChapterSyncAsset` schema
-- Updated `sync_hash` + `sync_version` for cache invalidation
-
-## Prerequisites (when you run this for real)
+## Quick start
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install whisperx torch
+npm run align:extract          # mockBook → assets/align/.../sentences.json
+npm run fetch:gatsby-audio     # LibriVox MP3 (gitignored)
+# → Run align_chapter.py on Colab (see COLAB.md)
+npm run validate:sync          # after placing assets/sync/.../ch-1.json
+npm run seed:supabase
 ```
 
-GPU strongly recommended for full-book runs.
+## Pipeline
 
-## Planned workflow
+1. **Extract** — `align:extract` emits reference sentences with stable IDs
+2. **Transcribe** — WhisperX transcribes LibriVox audio freely
+3. **Map** — DTW aligns WhisperX words onto reference tokens (exact on-screen words)
+4. **Offset** — `audio_offset_ms = first_word_start - 250ms` pre-roll
+5. **Validate** — `validate:sync` cross-checks against align input
+6. **Seed** — prefers `assets/sync/` when present via `chapterMediaManifest`
 
-1. **Measure offset** — detect first spoken word vs. file start; write `audio_offset_ms`.
-2. **Transcribe + align** — WhisperX forced alignment against known sentence tokens.
-3. **Export** — emit minified `{ w, s, e }` words per sentence; gzip for Storage.
-4. **Validate** — run `npx tsx scripts/alignment/exportSyncAssets.ts` diff check.
-5. **Upload** — push to `sync/{book_slug}/{chapter}.json` and update `chapters.sync_hash`.
+## Files
 
-## Stub entrypoint
+| File | Role |
+|------|------|
+| [`align_chapter.py`](align_chapter.py) | GPU alignment entrypoint |
+| [`COLAB.md`](COLAB.md) | Google Colab step-by-step |
+| [`requirements.txt`](requirements.txt) | Python deps |
 
-```bash
-python scripts/alignment/whisperx/align_chapter.py \
-  --audio path/to/chapter.mp3 \
-  --sentences path/to/sentences.json \
-  --offset-ms 18000 \
-  --out path/to/sync.json
-```
+## Coordinate contract
 
-The stub prints the expected CLI contract and exits. Replace the body with a
-real WhisperX pipeline when you are ready to generate production sync data.
-
-## MVP note
-
-The app ships with deterministic seeded sync JSON from `mockChapter.ts`.
-WhisperX replaces those timestamps when LibriVox audio is wired end-to-end.
+- Word `{ s, e }` = **visual timeline** (0 = first spoken word of chapter)
+- `audio_offset_ms` = file seek position (includes 250ms pre-roll before first word)
+- App player auto-seeks to `audio_offset_ms` on load

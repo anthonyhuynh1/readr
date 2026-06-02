@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ScreenShell } from '../components/ScreenShell';
 import { theme } from '../constants/theme';
@@ -51,7 +51,9 @@ function SourceToggle<T extends string>({
 
 export function ProfileScreen() {
   const { user, isDevGuest, signOutUser } = useAuth();
-  const { refreshCatalog } = usePlayback();
+  const { refreshCatalog, refreshCurrentChapter, bookmarks, stopSessionForSignOut } =
+    usePlayback();
+  const [signingOut, setSigningOut] = useState(false);
   const textSource = useContentStore((s) => s.textSource);
   const catalogSource = useContentStore((s) => s.catalogSource);
   const audioEnabled = useContentStore((s) => s.audioEnabled);
@@ -71,6 +73,24 @@ export function ProfileScreen() {
     void refreshCatalog();
   };
 
+  const handleAudioChange = (next: 'on' | 'off') => {
+    setAudioEnabled(next === 'on');
+    void refreshCurrentChapter();
+  };
+
+  const pendingBookmarks = bookmarks.filter((b) => b.pending_sync).length;
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await stopSessionForSignOut();
+      await signOutUser();
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
   return (
     <ScreenShell style={styles.root} edges={['top']}>
       <View style={styles.content}>
@@ -81,6 +101,13 @@ export function ProfileScreen() {
           <Text style={styles.email}>{user?.email ?? 'Unknown'}</Text>
           {isDevGuest ? (
             <Text style={styles.badge}>Local dev session (no cloud sync)</Text>
+          ) : hasSupabaseConfig() ? (
+            <Text style={styles.syncOk}>Bookmarks sync to your account</Text>
+          ) : null}
+          {!isDevGuest && pendingBookmarks > 0 ? (
+            <Text style={styles.badge}>
+              {pendingBookmarks} bookmark{pendingBookmarks === 1 ? '' : 's'} waiting to sync
+            </Text>
           ) : null}
         </View>
 
@@ -117,17 +144,25 @@ export function ProfileScreen() {
             <SourceToggle
               label="Audio"
               value={audioEnabled ? 'on' : 'off'}
-              onChange={(next) => setAudioEnabled(next === 'on')}
+              onChange={handleAudioChange}
               options={[
                 { id: 'off', title: 'Off' },
                 { id: 'on', title: 'On' },
               ]}
             />
+            <Text style={styles.hint}>
+              Audio + karaoke: ch.1 only. Placeholder is music until you run npm run fetch:gatsby-audio
+              and seed:supabase — then you get LibriVox narration.
+            </Text>
           </View>
         ) : null}
 
-        <Pressable style={styles.signOutButton} onPress={() => void signOutUser()}>
-          <Text style={styles.signOutText}>Sign out</Text>
+        <Pressable
+          style={[styles.signOutButton, signingOut && styles.signOutButtonDisabled]}
+          onPress={() => void handleSignOut()}
+          disabled={signingOut}
+        >
+          <Text style={styles.signOutText}>{signingOut ? 'Signing out…' : 'Sign out'}</Text>
         </Pressable>
       </View>
     </ScreenShell>
@@ -172,6 +207,11 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     fontSize: 12,
     color: theme.colors.brandOrange,
+  },
+  syncOk: {
+    marginTop: theme.spacing.sm,
+    fontSize: 12,
+    color: theme.colors.dimmedText,
   },
   sectionTitle: {
     fontSize: 14,
@@ -223,6 +263,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
+  },
+  signOutButtonDisabled: {
+    opacity: 0.6,
   },
   signOutText: {
     fontSize: 14,

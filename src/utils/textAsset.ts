@@ -56,7 +56,7 @@ export function textAssetToChapter(
     durationMs?: number;
   },
 ): Chapter {
-  let ms = meta.audioOffsetMs;
+  let ms = 0;
   const sentences: Sentence[] = asset.sentences.map((row) => {
     const words = wordsFromText(row.text, ms, 320);
     const lastWord = words.at(-1);

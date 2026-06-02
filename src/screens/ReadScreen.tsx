@@ -23,6 +23,7 @@ import { ReaderView } from '../components/ReaderView';
 import { BookmarksPanel } from '../components/BookmarksPanel';
 import { theme } from '../constants/theme';
 import { usePlaybackSession } from '../context/PlaybackContext';
+import { chapterHasPlayableAudio } from '../utils/chapterAudio';
 import { useReadSession } from '../hooks/useReadSession';
 import { usePlaybackStore } from '../store/usePlaybackStore';
 import type { RootStackParamList } from '../navigation/types';
@@ -73,6 +74,13 @@ function ReadTextView({
     void applyPlaybackRate(rate);
   };
 
+  const handleModeChange = (next: ReadViewMode) => {
+    if (next === 'listen' && !chapterHasPlayableAudio(chapter)) {
+      return;
+    }
+    onModeChange(next);
+  };
+
   return (
     <ScreenShell style={styles.readRoot}>
       <View style={styles.readHeader}>
@@ -102,7 +110,7 @@ function ReadTextView({
         <ReadModeBar
           mode="read"
           playbackRate={playbackRate}
-          onModeChange={onModeChange}
+          onModeChange={handleModeChange}
           onOpenSpeedPicker={() => setShowSpeedPicker(true)}
         />
         <AudioController compact />

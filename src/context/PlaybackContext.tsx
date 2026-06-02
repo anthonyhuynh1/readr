@@ -51,9 +51,11 @@ export interface PlaybackSessionValue {
   userId: string | null;
   isLoadingContent: boolean;
   refreshCatalog: () => Promise<void>;
+  refreshCurrentChapter: () => Promise<void>;
   openBook: (bookSlug: string, chapterSlug?: string) => Promise<void>;
   selectChapter: (chapterSlug: string) => Promise<void>;
   pauseSession: () => Promise<void>;
+  stopSessionForSignOut: () => Promise<void>;
 
   book: Book;
   chapter: Chapter;
@@ -186,6 +188,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const source = await resolveChapterAudioSource(
         nextChapter.slug,
         nextChapter.audioPath,
+        nextChapter.chapterIndex,
       );
       if (!source) {
         setUseFallbackClock(true);
@@ -318,6 +321,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
   }, [clearFallbackTimer, setPlaying]);
 
+  const stopSessionForSignOut = useCallback(async () => {
+    setPlaying(false);
+    clearFallbackTimer();
+    setAiSheetVisible(false);
+    setAiContextSentence(null);
+    setAiResponse(null);
+    setIsAskingAi(false);
+    setAudioError(null);
+    setAudioDurationMs(0);
+    setUseFallbackClock(false);
+    setBookmarks([]);
+    progressMs.value = 0;
+    setSyncTimeMs(0);
+    setBook(mockBook);
+    setChapter(mockChapter);
+    usePlaybackStore.getState().resetForSignOut();
+    await chapterAudioPlayer.unload();
+  }, [clearFallbackTimer, progressMs, setPlaying]);
+
   const play = useCallback(async () => {
     if (chapterAudioPlayer.isLoaded() && !useFallbackClock) {
       await chapterAudioPlayer.play();
@@ -395,6 +417,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setIsLoadingContent(false);
     }
   }, []);
+
+  const refreshCurrentChapter = useCallback(async () => {
+    if (!book.slug || !chapter.slug) return;
+    setSwitchingChapter(true);
+    try {
+      const payload = await fetchChapter(book.slug, chapter.slug);
+      await applyChapter(payload.book, payload.chapter, false);
+    } finally {
+      setSwitchingChapter(false);
+    }
+  }, [applyChapter, book.slug, chapter.slug, setSwitchingChapter]);
 
   const catalogSource = useContentStore((s) => s.catalogSource);
   const textSource = useContentStore((s) => s.textSource);
@@ -564,9 +597,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       userId: user?.id ?? null,
       isLoadingContent,
       refreshCatalog,
+      refreshCurrentChapter,
       openBook,
       selectChapter,
       pauseSession,
+      stopSessionForSignOut,
       book,
       chapter,
       wordIndex,
@@ -606,9 +641,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       user?.id,
       isLoadingContent,
       refreshCatalog,
+      refreshCurrentChapter,
       openBook,
       selectChapter,
       pauseSession,
+      stopSessionForSignOut,
       book,
       chapter,
       wordIndex,

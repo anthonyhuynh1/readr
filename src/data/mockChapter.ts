@@ -4,6 +4,7 @@ import { buildWordIndex, chapterToSyncAsset } from '../utils/syncAsset';
 import {
   buildChapterFromParagraphs,
   DEFAULT_LIBRIVOX_OFFSET_MS,
+  DEMO_CHAPTER_AUDIO_OFFSET_MS,
 } from '../utils/chapterBuilder';
 
 export { DEFAULT_LIBRIVOX_OFFSET_MS };
@@ -17,7 +18,7 @@ export const mockChapter: Chapter = buildChapter({
   pageNumber: 1,
   audioPath: 'audio/the-great-gatsby/ch-1.mp3',
   syncMetadataPath: 'sync/the-great-gatsby/ch-1.json',
-  audioOffsetMs: DEFAULT_LIBRIVOX_OFFSET_MS,
+  audioOffsetMs: DEMO_CHAPTER_AUDIO_OFFSET_MS,
   paragraphs: [
     'In my younger and more vulnerable years my father gave me some advice that I have been turning over in my mind ever since.',
     'Whenever you feel like criticizing any one, he told me, just remember that all the people in this world have not had the advantages that you have had.',

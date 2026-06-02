@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ScreenShell } from '../components/ScreenShell';
 import { theme } from '../constants/theme';
-import { hasSupabaseConfig } from '../config/env';
+import { hasSupabaseConfig, getSupabaseClientKeyKind } from '../config/env';
 import { useAuth } from '../context/AuthContext';
+import { canSubmitEmailOtp, EMAIL_OTP_MAX_LENGTH } from '../utils/emailOtp';
 
 type AuthStep = 'email' | 'code';
 
@@ -23,9 +24,10 @@ export function AuthScreen() {
 
   const trimmedEmail = email.trim();
   const trimmedCode = code.trim();
+  const keyKind = getSupabaseClientKeyKind();
   const messageIsError =
     authMessage !== null &&
-    !authMessage.startsWith('We sent a 6-digit code') &&
+    !authMessage.startsWith('We sent a sign-in code') &&
     authMessage !== 'Signed in.';
 
   const handleSendCode = async () => {
@@ -72,23 +74,23 @@ export function AuthScreen() {
           </>
         ) : (
           <>
-            <Text style={styles.codeHint}>Enter the 6-digit code sent to {trimmedEmail}</Text>
+            <Text style={styles.codeHint}>Enter the sign-in code sent to {trimmedEmail}</Text>
             <TextInput
               style={[styles.input, styles.codeInput]}
-              placeholder="000000"
+              placeholder="00000000"
               value={code}
               onChangeText={setCode}
               keyboardType="number-pad"
-              maxLength={6}
+              maxLength={EMAIL_OTP_MAX_LENGTH}
               editable={!isAuthBusy}
             />
             <Pressable
               style={[
                 styles.button,
-                (trimmedCode.length !== 6 || isAuthBusy) && styles.buttonDisabled,
+                (!canSubmitEmailOtp(trimmedCode) || isAuthBusy) && styles.buttonDisabled,
               ]}
               onPress={() => void handleVerifyCode()}
-              disabled={trimmedCode.length !== 6 || isAuthBusy}
+              disabled={!canSubmitEmailOtp(trimmedCode) || isAuthBusy}
             >
               <Text style={styles.buttonText}>
                 {isAuthBusy ? 'Verifying…' : 'Verify & Sign In'}
@@ -106,6 +108,12 @@ export function AuthScreen() {
             </Pressable>
           </>
         )}
+
+        {__DEV__ && hasSupabaseConfig() && keyKind !== 'publishable' ? (
+          <Text style={styles.keyWarning}>
+            App API key is {keyKind} — use sb_publishable_… in .env, then run: npx expo start -c
+          </Text>
+        ) : null}
 
         {authMessage ? (
           <Text
@@ -221,6 +229,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: theme.colors.dimmedText,
+    textAlign: 'center',
+  },
+  keyWarning: {
+    marginTop: theme.spacing.md,
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.colors.brandOrange,
     textAlign: 'center',
   },
   secondaryButton: {

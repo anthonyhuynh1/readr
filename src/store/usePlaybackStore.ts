@@ -26,6 +26,7 @@ interface PlaybackStore {
   setScrollTarget: (index: number | null) => void;
   clearScrollTarget: () => void;
   setPlaybackRate: (rate: PlaybackSpeed) => void;
+  resetForSignOut: () => void;
 }
 
 export const usePlaybackStore = create<PlaybackStore>((set) => ({
@@ -56,4 +57,16 @@ export const usePlaybackStore = create<PlaybackStore>((set) => ({
   setScrollTarget: (index) => set({ scrollToSentenceIndex: index }),
   clearScrollTarget: () => set({ scrollToSentenceIndex: null }),
   setPlaybackRate: (rate) => set({ playbackRate: rate }),
+  resetForSignOut: () =>
+    set({
+      currentChapterSlug: null,
+      currentBookSlug: null,
+      loadedBookSlug: null,
+      isPlaying: false,
+      isImmersive: false,
+      isOpeningBook: false,
+      isSwitchingChapter: false,
+      activeSentenceIndex: -1,
+      scrollToSentenceIndex: null,
+    }),
 }));

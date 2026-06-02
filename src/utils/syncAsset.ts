@@ -2,6 +2,15 @@ import type { Chapter, Sentence, WordTimestamp } from '../types';
 import type { ChapterSyncAsset, SyncAssetSentence } from '../types/syncAsset';
 import type { IndexedWord } from '../types';
 
+/** Sync JSON may store word times in file-audio coords (legacy) or visual coords (0 = chapter start). */
+export function usesLegacyAudioWordTimings(asset: ChapterSyncAsset): boolean {
+  const offset = asset.audio_offset_ms;
+  if (offset <= 0) return false;
+  const first = asset.sentences[0]?.words[0]?.s;
+  if (first === undefined) return false;
+  return first >= offset * 0.5;
+}
+
 /** Expand minified sync asset into runtime chapter sentences. */
 export function syncAssetToChapter(
   asset: ChapterSyncAsset,
@@ -16,14 +25,18 @@ export function syncAssetToChapter(
     durationMs?: number;
   },
 ): Chapter {
+  const legacyTimings = usesLegacyAudioWordTimings(asset);
+  const offset = asset.audio_offset_ms;
   let globalWordIndex = 0;
   const sentences: Sentence[] = asset.sentences.map((block) => {
     const words: WordTimestamp[] = block.words.map((entry) => {
+      const startMs = legacyTimings ? entry.s - offset : entry.s;
+      const endMs = legacyTimings ? entry.e - offset : entry.e;
       const word: WordTimestamp = {
         index: globalWordIndex,
         word: entry.w,
-        start_ms: entry.s,
-        end_ms: entry.e,
+        start_ms: startMs,
+        end_ms: endMs,
       };
       globalWordIndex += 1;
       return word;
@@ -39,7 +52,9 @@ export function syncAssetToChapter(
   });
 
   const lastWord = sentences.at(-1)?.words.at(-1);
-  const durationMs = meta.durationMs ?? lastWord?.end_ms ?? 0;
+  const rawDuration = meta.durationMs ?? lastWord?.end_ms ?? 0;
+  const durationMs =
+    legacyTimings && rawDuration > offset ? rawDuration - offset : rawDuration;
 
   return {
     slug: asset.chapter_slug,

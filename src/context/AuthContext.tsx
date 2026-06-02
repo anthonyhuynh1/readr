@@ -146,10 +146,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOutUser = useCallback(async () => {
-    await signOut();
     setSession(null);
     setDevGuestUser(null);
     setAuthMessage(null);
+    await signOut();
   }, []);
 
   const user = session?.user ?? devGuestUser;

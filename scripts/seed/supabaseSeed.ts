@@ -10,19 +10,24 @@
  *
  * Run: npm run seed:supabase
  */
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { seededBooks, getBundledSyncAsset } from '../../src/data/mockChapter';
 import { getBookCoverUrl } from '../../src/data/bookCovers';
 import {
   buildChapterFromParagraphs,
-  DEFAULT_LIBRIVOX_OFFSET_MS,
+  DEMO_CHAPTER_AUDIO_OFFSET_MS,
 } from '../../src/utils/chapterBuilder';
-import { chapterToSyncAsset, hashSyncAsset } from '../../src/utils/syncAsset';
+import { chapterToSyncAsset, hashSyncAsset, syncAssetToChapter } from '../../src/utils/syncAsset';
 import { hashTextAsset } from '../../src/utils/textAsset';
 import type { ChapterTextAsset } from '../../src/types/chapterTextAsset';
+import type { ChapterSyncAsset } from '../../src/types/syncAsset';
 import type { Book, Chapter } from '../../src/types';
+import {
+  findChapterMediaEntry,
+  resolveRepoPath,
+} from '../alignment/chapterMediaManifest';
 
 interface MockBookChapterDef {
   slug: string;
@@ -77,6 +82,33 @@ const supabase = createClient(supabaseUrl, serviceKey, {
 });
 
 const DEMO_AUDIO = join(process.cwd(), 'assets', 'audio', 'demo-chapter.mp3');
+const LIBRIVOX_GATSBY_CH1 = join(
+  process.cwd(),
+  'assets',
+  'audio',
+  'gatsby-ch1-librivox.mp3',
+);
+
+function resolveChapterAudioFile(bookSlug: string, chapterIndex: number): string | null {
+  const media = findChapterMediaEntry(bookSlug, chapterIndex);
+  if (media) {
+    const mediaPath = resolveRepoPath(media.audioLocalPath);
+    if (existsSync(mediaPath)) return mediaPath;
+  }
+  if (chapterIndex === 1 && bookSlug === 'the-great-gatsby') {
+    if (existsSync(LIBRIVOX_GATSBY_CH1)) return LIBRIVOX_GATSBY_CH1;
+    if (existsSync(DEMO_AUDIO)) return DEMO_AUDIO;
+  }
+  return null;
+}
+
+function loadAlignedSyncAsset(bookSlug: string, chapterIndex: number): ChapterSyncAsset | null {
+  const media = findChapterMediaEntry(bookSlug, chapterIndex);
+  if (!media) return null;
+  const syncPath = resolveRepoPath(media.syncOutputPath);
+  if (!existsSync(syncPath)) return null;
+  return JSON.parse(readFileSync(syncPath, 'utf8')) as ChapterSyncAsset;
+}
 const MOCK_BOOK_PATH = join(process.cwd(), 'src', 'mocks', 'mockBook.json');
 const useLegacy = process.argv.includes('--legacy');
 
@@ -113,15 +145,30 @@ function loadMockBook(): MockBookFile {
 }
 
 function buildChapterFromMockDef(bookSlug: string, def: MockBookChapterDef): Chapter {
-  return buildChapterFromParagraphs({
-    slug: def.slug,
+  const audioPath = `audio/${bookSlug}/ch-${def.chapterIndex}.mp3`;
+  const syncMetadataPath = `sync/${bookSlug}/ch-${def.chapterIndex}.json`;
+  const meta = {
     bookSlug,
     title: def.title,
     chapterIndex: def.chapterIndex,
     pageNumber: def.pageNumber,
-    audioPath: `audio/${bookSlug}/ch-${def.chapterIndex}.mp3`,
-    syncMetadataPath: `sync/${bookSlug}/ch-${def.chapterIndex}.json`,
-    audioOffsetMs: DEFAULT_LIBRIVOX_OFFSET_MS,
+    audioPath,
+    syncMetadataPath,
+  };
+
+  const alignedSync = loadAlignedSyncAsset(bookSlug, def.chapterIndex);
+  if (alignedSync) {
+    alignedSync.sync_hash = hashSyncAsset(alignedSync);
+    return syncAssetToChapter(alignedSync, {
+      ...meta,
+      syncHash: alignedSync.sync_hash ?? hashSyncAsset(alignedSync),
+    });
+  }
+
+  return buildChapterFromParagraphs({
+    slug: def.slug,
+    ...meta,
+    audioOffsetMs: DEMO_CHAPTER_AUDIO_OFFSET_MS,
     paragraphs: def.paragraphs,
   });
 }
@@ -181,9 +228,16 @@ async function seedBook(
     await uploadFile('sync', syncPath, syncJson, 'application/json');
 
     const audioStoragePath = chapter.audioPath.replace(/^audio\//, '');
-    if (uploadDemoAudioForFirstChapter && chapter.chapterIndex === 1 && existsSync(DEMO_AUDIO)) {
-      const audioBuf = readFileSync(DEMO_AUDIO);
-      await uploadFile('audio', audioStoragePath, audioBuf, 'audio/mpeg');
+    const chapterAudio = resolveChapterAudioFile(book.slug, chapter.chapterIndex);
+    if (chapterAudio) {
+      const media = findChapterMediaEntry(book.slug, chapter.chapterIndex);
+      const uploadThisChapter =
+        media !== undefined ||
+        (uploadDemoAudioForFirstChapter && chapter.chapterIndex === 1);
+      if (uploadThisChapter) {
+        const audioBuf = readFileSync(chapterAudio);
+        await uploadFile('audio', audioStoragePath, audioBuf, 'audio/mpeg');
+      }
     }
 
     const { error: chapterError } = await supabase.from('chapters').upsert(
@@ -268,20 +322,6 @@ async function main(): Promise<void> {
   } else {
     console.log(`Using ${MOCK_BOOK_PATH}`);
     await seedFromMockBook();
-  }
-
-  const assetsSyncDir = join(process.cwd(), 'assets', 'sync');
-  if (existsSync(assetsSyncDir)) {
-    for (const bookDir of readdirSync(assetsSyncDir, { withFileTypes: true })) {
-      if (!bookDir.isDirectory()) continue;
-      const bookPath = join(assetsSyncDir, bookDir.name);
-      for (const file of readdirSync(bookPath)) {
-        if (!file.endsWith('.json')) continue;
-        const full = join(bookPath, file);
-        const syncPath = `${bookDir.name}/${file}`;
-        await uploadFile('sync', syncPath, readFileSync(full), 'application/json');
-      }
-    }
   }
 
   console.log('Done.');

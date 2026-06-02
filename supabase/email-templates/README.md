@@ -1,6 +1,8 @@
 # Supabase email template (required for OTP sign-in)
 
-Supabase's **default Magic Link template only shows a clickable link** — it does not display the 6-digit code, even though Supabase generates one.
+Supabase's **default Magic Link template only shows a clickable link** — it does not display the numeric sign-in code, even though Supabase generates one.
+
+Codes are usually **6 or 8 digits** depending on your project settings.
 
 ## One-time setup (~2 minutes)
 
