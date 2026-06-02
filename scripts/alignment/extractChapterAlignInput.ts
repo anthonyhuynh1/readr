@@ -147,13 +147,13 @@ function main(): void {
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(alignInput, null, 2)}\n`, 'utf8');
 
-  // eslint-disable-next-line no-console -- CLI script output
+   
   console.log(`Wrote ${entry.alignInputPath}`);
-  // eslint-disable-next-line no-console -- CLI script output
+   
   console.log(`  chapter:   ${alignInput.chapter_slug}`);
-  // eslint-disable-next-line no-console -- CLI script output
+   
   console.log(`  sentences: ${alignInput.sentences.length}`);
-  // eslint-disable-next-line no-console -- CLI script output
+   
   console.log(
     `  first:     ${alignInput.sentences[0]?.text.slice(0, 72)}${(alignInput.sentences[0]?.text.length ?? 0) > 72 ? '…' : ''}`,
   );

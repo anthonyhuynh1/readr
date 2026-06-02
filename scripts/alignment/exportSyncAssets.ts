@@ -22,10 +22,10 @@ for (const book of seededBooks) {
     const fileName = `${chapter.slug.replace(`${book.slug}-`, '')}.json`;
     const outPath = join(bookDir, fileName);
     writeFileSync(outPath, JSON.stringify(asset, null, 2));
-    // eslint-disable-next-line no-console -- CLI script output
+     
     console.log(`wrote ${outPath}`);
   }
 }
 
-// eslint-disable-next-line no-console -- CLI script output
+ 
 console.log('Done exporting sync assets.');

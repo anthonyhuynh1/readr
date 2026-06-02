@@ -11,7 +11,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ext .ts,.tsx",
+    "lint": "eslint .",
     "test": "vitest run",
     "ci": "npm run typecheck && npm run lint && npm run test && npm run validate:mock-book && npm run validate:sync",
     "seed:supabase": "tsx scripts/seed/supabaseSeed.ts",

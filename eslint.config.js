@@ -30,4 +30,10 @@ module.exports = [
       ],
     },
   },
+  {
+    files: ['scripts/**/*.{ts,tsx}'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 ];
