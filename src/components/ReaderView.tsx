@@ -1,86 +1,31 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ScrollView,
   StyleSheet,
-  Text,
   View,
-  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ViewToken,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { theme } from '../constants/theme';
 import { usePlaybackSession } from '../context/PlaybackContext';
-import { useLongPress } from '../hooks/useLongPress';
-import { useSyncEngine } from '../hooks/useSyncEngine';
-import type { Sentence, WordTimestamp } from '../types';
+import { usePlaybackStore } from '../store/usePlaybackStore';
+import type { Sentence } from '../types';
+import { estimateRowHeight, getRowItemType } from '../utils/readerRowLayout';
+import { shouldShowWordKaraoke } from '../utils/readerViewUtils';
 import { SentenceActionPopover } from './BookmarksPanel';
-import { KaraokeWord } from './KaraokeWord';
+import { ParagraphRow } from './read/ParagraphRow';
 
-interface SentenceRowProps {
-  sentence: Sentence;
-  isActiveSentence: boolean;
-  isImmersive: boolean;
-  karaokeWords: boolean;
-  onWordPress: (word: WordTimestamp) => void;
-  onSentenceLongPress: (sentence: Sentence, anchorY: number) => void;
-}
-
-const SentenceRow = memo(function SentenceRow({
-  sentence,
-  isActiveSentence,
-  isImmersive,
-  karaokeWords,
-  onWordPress,
-  onSentenceLongPress,
-}: SentenceRowProps) {
-  const rowRef = useRef<View>(null);
-
-  const handleLongPress = useCallback(() => {
-    rowRef.current?.measureInWindow((_x, y) => {
-      onSentenceLongPress(sentence, y);
-    });
-  }, [onSentenceLongPress, sentence]);
-
-  const longPress = useLongPress({ onLongPress: handleLongPress });
-
-  const opacity = isImmersive
-    ? isActiveSentence
-      ? theme.opacity.active
-      : theme.opacity.dimmed
-    : theme.opacity.active;
-
-  return (
-    <View
-      ref={rowRef}
-      style={[styles.paragraph, { opacity }]}
-      onTouchStart={longPress.onTouchStart}
-      onTouchMove={longPress.onTouchMove}
-      onTouchEnd={longPress.onTouchEnd}
-      onTouchCancel={longPress.onTouchCancel}
-    >
-      {karaokeWords ? (
-        <View style={styles.sentenceRow}>
-          {sentence.words.map((word, wi) => (
-            <KaraokeWord
-              key={`${sentence.id}-w-${word.index}`}
-              word={word}
-              isKaraokeActive={isImmersive}
-              trailingSpace={wi < sentence.words.length - 1}
-              onPress={() => {
-                if (longPress.consumeIfTriggered()) return;
-                onWordPress(word);
-              }}
-            />
-          ))}
-        </View>
-      ) : (
-        <Text style={styles.readerText}>{sentence.text}</Text>
-      )}
-    </View>
-  );
-});
+const FOLLOW_SCROLL_OFFSET = 120;
+const FOLLOW_PAUSE_MS = 8000;
+const SCROLL_RETRY_MS = 100;
 
 export function ReaderView() {
-  const scrollRef = useRef<ScrollView>(null);
-  const sentenceLayouts = useRef<Record<number, number>>({});
+  const listRef = useRef<FlashList<Sentence>>(null);
+  const followPausedUntilRef = useRef(0);
+  const forceScrollRef = useRef(false);
+  const visibleIndicesRef = useRef<Set<number>>(new Set());
+  const rowHeightCacheRef = useRef<Record<number, number>>({});
 
   const {
     chapter,
@@ -95,18 +40,20 @@ export function ReaderView() {
     clearScrollTarget,
   } = usePlaybackSession();
 
-  const { sentenceIndex: activeSentenceIndex } = useSyncEngine();
-
-  const karaokeEnabled = !audioError && isImmersive;
+  const activeSentenceIndex = usePlaybackStore((s) => s.activeSentenceIndex);
+  const isPlaying = usePlaybackStore((s) => s.isPlaying);
+  const followMode = usePlaybackStore((s) => s.followMode);
+  const syncReady = chapter.syncReady !== false;
+  const karaokeEnabled = !audioError && isImmersive && syncReady;
 
   const [popover, setPopover] = useState<{
     sentence: Sentence;
     anchorY: number;
   } | null>(null);
 
-  const handleWordPress = useCallback(
-    (word: WordTimestamp) => {
-      seekToWord(word.start_ms);
+  const handleSpanSeek = useCallback(
+    (startMs: number) => {
+      void seekToWord(startMs);
     },
     [seekToWord],
   );
@@ -143,53 +90,171 @@ export function ReaderView() {
     setPopover(null);
   }, [popover, openAskAi]);
 
-  const handleSentenceLayout = useCallback((index: number, y: number) => {
-    sentenceLayouts.current[index] = y;
+  const getEstimatedOffset = useCallback(
+    (index: number) => {
+      let offset = 0;
+      for (let i = 0; i < index; i++) {
+        const sentence = chapter.sentences[i];
+        offset += rowHeightCacheRef.current[i] ?? estimateRowHeight(sentence);
+      }
+      return Math.max(0, offset - FOLLOW_SCROLL_OFFSET);
+    },
+    [chapter.sentences],
+  );
+
+  const scrollToSentence = useCallback(
+    (index: number, animated = true) => {
+      listRef.current?.scrollToIndex({
+        index,
+        animated,
+        viewOffset: FOLLOW_SCROLL_OFFSET,
+      });
+
+      // FlashList scrollToIndex is a no-op until layout exists — retry after measure.
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({
+          index,
+          animated,
+          viewOffset: FOLLOW_SCROLL_OFFSET,
+        });
+      }, SCROLL_RETRY_MS);
+
+      setTimeout(() => {
+        listRef.current?.scrollToOffset({
+          offset: getEstimatedOffset(index),
+          animated: false,
+        });
+        setTimeout(() => {
+          listRef.current?.scrollToIndex({
+            index,
+            animated,
+            viewOffset: FOLLOW_SCROLL_OFFSET,
+          });
+        }, SCROLL_RETRY_MS);
+      }, SCROLL_RETRY_MS * 2);
+    },
+    [getEstimatedOffset],
+  );
+
+  const handleScrollBeginDrag = useCallback(() => {
+    followPausedUntilRef.current = Date.now() + FOLLOW_PAUSE_MS;
   }, []);
 
-  const scrollToSentence = useCallback((index: number) => {
-    const y = sentenceLayouts.current[index];
-    if (y !== undefined) {
-      scrollRef.current?.scrollTo({ y: Math.max(0, y - 120), animated: true });
+  const handleViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      visibleIndicesRef.current = new Set(
+        viewableItems
+          .map((item) => item.index)
+          .filter((index): index is number => index !== null && index !== undefined),
+      );
+    },
+    [],
+  );
+
+  const viewabilityConfigCallbackPairs = useRef([
+    {
+      viewabilityConfig: { itemVisiblePercentThreshold: 10 },
+      onViewableItemsChanged: handleViewableItemsChanged,
+    },
+  ]).current;
+
+  const handleRowLayout = useCallback((index: number, height: number) => {
+    if (height > 0) {
+      rowHeightCacheRef.current[index] = height;
     }
   }, []);
 
   useEffect(() => {
-    if (activeSentenceIndex < 0 || !isImmersive) return;
+    if (activeSentenceIndex < 0 || !isImmersive || !followMode) return;
+    if (Date.now() < followPausedUntilRef.current && !forceScrollRef.current) return;
+
     scrollToSentence(activeSentenceIndex);
-  }, [activeSentenceIndex, isImmersive, scrollToSentence]);
+    forceScrollRef.current = false;
+  }, [activeSentenceIndex, isImmersive, followMode, scrollToSentence]);
 
   useEffect(() => {
     if (scrollToSentenceIndex === null) return;
+    forceScrollRef.current = true;
     scrollToSentence(scrollToSentenceIndex);
     clearScrollTarget();
   }, [scrollToSentenceIndex, scrollToSentence, clearScrollTarget]);
 
+  const renderItem = useCallback(
+    ({ item, index }: { item: Sentence; index: number }) => (
+      <ParagraphRow
+        sentence={item}
+        isActiveSentence={index === activeSentenceIndex}
+        isImmersive={isImmersive}
+        isPlaying={isPlaying}
+        showWordKaraoke={shouldShowWordKaraoke(
+          karaokeEnabled,
+          isPlaying,
+          index,
+          activeSentenceIndex,
+        )}
+        onSpanSeek={handleSpanSeek}
+        onSentenceLongPress={handleSentenceLongPress}
+        onLayout={(height) => handleRowLayout(index, height)}
+      />
+    ),
+    [
+      activeSentenceIndex,
+      isImmersive,
+      isPlaying,
+      karaokeEnabled,
+      handleSpanSeek,
+      handleSentenceLongPress,
+      handleRowLayout,
+    ],
+  );
+
+  const overrideItemLayout = useCallback(
+    (
+      layout: { span?: number; size?: number },
+      item: Sentence,
+      index: number,
+    ) => {
+      layout.size =
+        rowHeightCacheRef.current[index] ?? estimateRowHeight(item);
+    },
+    [],
+  );
+
+  const handleScroll = useCallback((_event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // FlashList scroll position tracked via viewability for follow mode.
+  }, []);
+
+  const averageEstimatedSize =
+    chapter.sentences.length > 0
+      ? Math.round(
+          chapter.sentences.reduce((sum, s) => sum + estimateRowHeight(s), 0) /
+            chapter.sentences.length,
+        )
+      : 120;
+
   return (
     <View style={styles.container}>
-      <ScrollView
-        ref={scrollRef}
+      <FlashList
+        ref={listRef}
+        data={chapter.sentences}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        estimatedItemSize={averageEstimatedSize}
+        overrideItemLayout={overrideItemLayout}
+        getItemType={getRowItemType}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {chapter.sentences.map((sentence, si) => (
-          <View
-            key={sentence.id}
-            onLayout={(e: LayoutChangeEvent) =>
-              handleSentenceLayout(si, e.nativeEvent.layout.y)
-            }
-          >
-            <SentenceRow
-              sentence={sentence}
-              isActiveSentence={si === activeSentenceIndex}
-              isImmersive={isImmersive}
-              karaokeWords={karaokeEnabled && si === activeSentenceIndex}
-              onWordPress={handleWordPress}
-              onSentenceLongPress={handleSentenceLongPress}
-            />
-          </View>
-        ))}
-      </ScrollView>
+        onScrollBeginDrag={handleScrollBeginDrag}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
+        extraData={{
+          activeSentenceIndex,
+          isImmersive,
+          isPlaying,
+          karaokeEnabled,
+        }}
+      />
 
       <SentenceActionPopover
         visible={popover !== null}
@@ -212,18 +277,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.xl,
     paddingBottom: theme.spacing.xxl * 2,
-  },
-  paragraph: {
-    marginBottom: theme.spacing.lg,
-  },
-  sentenceRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  readerText: {
-    fontSize: theme.typography.reader.fontSize,
-    lineHeight: theme.typography.reader.lineHeight,
-    letterSpacing: theme.typography.reader.letterSpacing,
-    color: theme.colors.activeText,
   },
 });

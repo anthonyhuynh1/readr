@@ -15,6 +15,8 @@ interface PlaybackStore {
   activeSentenceIndex: number;
   scrollToSentenceIndex: number | null;
   playbackRate: PlaybackSpeed;
+  /** When true, auto-scroll keeps the active paragraph in view during playback. */
+  followMode: boolean;
 
   setChapter: (bookSlug: string, chapterSlug: string) => void;
   setLoadedBookSlug: (slug: string | null) => void;
@@ -26,6 +28,7 @@ interface PlaybackStore {
   setScrollTarget: (index: number | null) => void;
   clearScrollTarget: () => void;
   setPlaybackRate: (rate: PlaybackSpeed) => void;
+  setFollowMode: (follow: boolean) => void;
   resetForSignOut: () => void;
 }
 
@@ -40,6 +43,7 @@ export const usePlaybackStore = create<PlaybackStore>((set) => ({
   activeSentenceIndex: -1,
   scrollToSentenceIndex: null,
   playbackRate: 1,
+  followMode: true,
 
   setChapter: (bookSlug, chapterSlug) =>
     set({
@@ -57,6 +61,7 @@ export const usePlaybackStore = create<PlaybackStore>((set) => ({
       isImmersive: playing ? true : state.isImmersive,
     })),
   setImmersive: (immersive) => set({ isImmersive: immersive }),
+  setFollowMode: (follow) => set({ followMode: follow }),
   setActiveSentenceIndex: (index) => set({ activeSentenceIndex: index }),
   setScrollTarget: (index) => set({ scrollToSentenceIndex: index }),
   clearScrollTarget: () => set({ scrollToSentenceIndex: null }),
@@ -72,5 +77,6 @@ export const usePlaybackStore = create<PlaybackStore>((set) => ({
       isSwitchingChapter: false,
       activeSentenceIndex: -1,
       scrollToSentenceIndex: null,
+      followMode: true,
     }),
 }));

@@ -21,6 +21,8 @@ export interface ChapterSyncAsset {
   sync_version: number;
   sync_hash?: string;
   audio_offset_ms: number;
+  /** Word time coordinate system. Defaults to visual when absent (post-repair assets). */
+  timeline_coords?: 'visual' | 'file_absolute';
   sentences: SyncAssetSentence[];
 }
 

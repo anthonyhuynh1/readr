@@ -1,3 +1,4 @@
+import 'react-native-reanimated';
 import React from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';

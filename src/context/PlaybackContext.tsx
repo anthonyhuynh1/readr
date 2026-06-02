@@ -30,6 +30,11 @@ import {
   type PlaybackSpeed,
 } from '../store/usePlaybackStore';
 import { useAuth } from './AuthContext';
+import {
+  buildSentenceTimeBounds,
+  findActiveSentenceIndex,
+  type SentenceTimeBounds,
+} from '../utils/sentenceSync';
 import type {
   AskAiResponse,
   Book,
@@ -40,11 +45,10 @@ import type {
   Sentence,
 } from '../types';
 
-const SYNC_UI_INTERVAL_MS = 50;
 const FALLBACK_TICK_MS = 16;
 const SKIP_MS = 15_000;
 
-/** Session + actions — excludes syncTimeMs so Listen UI avoids ~10 Hz re-renders. */
+/** Session + actions for playback, catalog, and reader chrome. */
 export interface PlaybackSessionValue {
   books: Book[];
   catalog: BookCatalogItem[];
@@ -96,12 +100,7 @@ export interface PlaybackSessionValue {
   submitAskAi: (userPrompt: string) => Promise<void>;
 }
 
-export interface PlaybackContextValue extends PlaybackSessionValue {
-  syncTimeMs: number;
-}
-
 const PlaybackSessionContext = createContext<PlaybackSessionValue | null>(null);
-const SyncTimeContext = createContext(0);
 
 export function PlaybackProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
@@ -141,7 +140,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const wordIndex = useMemo(() => buildWordIndex(chapter), [chapter]);
 
-  const [syncTimeMs, setSyncTimeMs] = useState(0);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [aiSheetVisible, setAiSheetVisible] = useState(false);
   const [aiContextSentence, setAiContextSentence] = useState<Sentence | null>(null);
@@ -149,21 +147,35 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [isAskingAi, setIsAskingAi] = useState(false);
 
   const fallbackRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const syncUiRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chapterSlugRef = useRef(chapter.slug);
+  const sentenceBoundsRef = useRef<SentenceTimeBounds>({ starts: [], ends: [] });
+  const lastActiveSentenceRef = useRef(-1);
 
   useEffect(() => {
     chapterSlugRef.current = chapter.slug;
   }, [chapter.slug]);
 
+  useEffect(() => {
+    sentenceBoundsRef.current = buildSentenceTimeBounds(chapter.sentences);
+    lastActiveSentenceRef.current = -1;
+    usePlaybackStore.getState().setActiveSentenceIndex(-1);
+  }, [chapter.slug, chapter.sentences]);
+
+  const syncActiveSentenceIndex = useCallback((visualMs: number) => {
+    const { starts, ends } = sentenceBoundsRef.current;
+    if (starts.length === 0) return;
+
+    const idx = findActiveSentenceIndex(starts, ends, visualMs);
+    if (idx !== lastActiveSentenceRef.current) {
+      lastActiveSentenceRef.current = idx;
+      usePlaybackStore.getState().setActiveSentenceIndex(idx);
+    }
+  }, []);
+
   const clearFallbackTimer = useCallback(() => {
     if (fallbackRef.current) {
       clearInterval(fallbackRef.current);
       fallbackRef.current = null;
-    }
-    if (syncUiRef.current) {
-      clearInterval(syncUiRef.current);
-      syncUiRef.current = null;
     }
   }, []);
 
@@ -173,15 +185,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   );
   const hasPrevChapter = chapterIndex > 0;
   const hasNextChapter = chapterIndex >= 0 && chapterIndex < book.chapters.length - 1;
-  const timelineDurationMs = Math.max(chapter.durationMs, audioDurationMs);
+  const lastWordEndMs = wordIndex.at(-1)?.word.end_ms ?? 0;
+  const timelineDurationMs = Math.max(chapter.durationMs, audioDurationMs, lastWordEndMs);
 
   const applyVisualPosition = useCallback(
     (visualMs: number) => {
       const clamped = Math.max(0, Math.min(visualMs, timelineDurationMs));
       progressMs.value = clamped;
-      setSyncTimeMs(clamped);
+      syncActiveSentenceIndex(clamped);
     },
-    [timelineDurationMs, progressMs],
+    [timelineDurationMs, progressMs, syncActiveSentenceIndex],
   );
 
   const loadChapterAudio = useCallback(
@@ -243,7 +256,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       if (resetProgress) {
         progressMs.value = 0;
-        setSyncTimeMs(0);
         setAudioDurationMs(0);
       }
 
@@ -334,7 +346,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     setUseFallbackClock(false);
     setBookmarks([]);
     progressMs.value = 0;
-    setSyncTimeMs(0);
     setBook(mockBook);
     setChapter(mockChapter);
     usePlaybackStore.getState().resetForSignOut();
@@ -552,7 +563,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     fallbackRef.current = setInterval(() => {
       const next = Math.min(progressMs.value + FALLBACK_TICK_MS, timelineDurationMs);
       progressMs.value = next;
-      setSyncTimeMs(next);
+      syncActiveSentenceIndex(next);
       if (next >= timelineDurationMs) {
         setPlaying(false);
       }
@@ -564,17 +575,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         fallbackRef.current = null;
       }
     };
-  }, [isPlaying, useFallbackClock, timelineDurationMs, progressMs, setPlaying]);
-
-  useEffect(() => {
-    if (useFallbackClock) return;
-
-    const id = setInterval(() => {
-      setSyncTimeMs(progressMs.value);
-    }, SYNC_UI_INTERVAL_MS);
-
-    return () => clearInterval(id);
-  }, [useFallbackClock, progressMs]);
+  }, [isPlaying, useFallbackClock, timelineDurationMs, progressMs, setPlaying, syncActiveSentenceIndex]);
 
   useEffect(() => {
     return () => {
@@ -676,7 +677,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlaybackSessionContext.Provider value={sessionValue}>
-      <SyncTimeContext.Provider value={syncTimeMs}>{children}</SyncTimeContext.Provider>
+      {children}
     </PlaybackSessionContext.Provider>
   );
 }
@@ -689,14 +690,7 @@ export function usePlaybackSession(): PlaybackSessionValue {
   return ctx;
 }
 
-export function usePlayback(): PlaybackContextValue {
-  const session = usePlaybackSession();
-  const syncTimeMs = useContext(SyncTimeContext);
-  return useMemo(
-    () => ({
-      ...session,
-      syncTimeMs,
-    }),
-    [session, syncTimeMs],
-  );
+/** Alias for session context — active sentence sync no longer uses React clock state. */
+export function usePlayback(): PlaybackSessionValue {
+  return usePlaybackSession();
 }

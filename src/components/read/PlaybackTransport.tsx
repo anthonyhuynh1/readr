@@ -18,9 +18,10 @@ export function PlaybackTransport({ compact = false, dark = false }: PlaybackTra
   const { togglePlay, chapter, audioDurationMs, skipBack15, skipForward15, audioError } =
     usePlaybackSession();
   const isPlaying = usePlaybackStore((s) => s.isPlaying);
-  const syncTimeMs = useCoarseSyncTime(50);
+  const lastWordEndMs = chapter.sentences.at(-1)?.words.at(-1)?.end_ms ?? 0;
+  const syncTimeMs = useCoarseSyncTime();
 
-  const durationMs = Math.max(chapter.durationMs, audioDurationMs, 1);
+  const durationMs = Math.max(chapter.durationMs, audioDurationMs, lastWordEndMs, 1);
   const remainingMs = Math.max(0, durationMs - syncTimeMs);
 
   const timeStyle = dark ? styles.timeDark : styles.time;

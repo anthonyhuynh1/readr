@@ -1,11 +1,11 @@
 import mockBookJson from '../../mocks/mockBook.json';
-import { getBundledSyncAsset } from '../../data/mockChapter';
+import { getBundledSyncAsset } from '../../data/bundledSyncAssets';
 import type { Book, Chapter } from '../../types';
 import {
   buildChapterFromParagraphs,
   DEFAULT_LIBRIVOX_OFFSET_MS,
 } from '../../utils/chapterBuilder';
-import { syncAssetToChapter } from '../../utils/syncAsset';
+import { hashSyncAsset, syncAssetToChapter } from '../../utils/syncAsset';
 import { loadChapterSyncAsset } from '../sync/cache';
 
 export interface MockBookChapterDef {
@@ -106,9 +106,10 @@ export function getMockBook(): Book {
 
 async function hydrateChapter(book: Book, chapter: Chapter): Promise<Chapter> {
   const bundled = getBundledSyncAsset(chapter);
+  const syncHash = hashSyncAsset(bundled);
   const { asset } = await loadChapterSyncAsset(chapter.slug, {
-    syncHash: chapter.syncHash,
-    syncVersion: chapter.syncVersion,
+    syncHash,
+    syncVersion: bundled.sync_version,
     bundledAsset: bundled,
   });
 
@@ -119,7 +120,7 @@ async function hydrateChapter(book: Book, chapter: Chapter): Promise<Chapter> {
     pageNumber: chapter.pageNumber,
     audioPath: chapter.audioPath,
     syncMetadataPath: chapter.syncMetadataPath,
-    syncHash: chapter.syncHash,
+    syncHash,
     durationMs: chapter.durationMs,
   });
 }

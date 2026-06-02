@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { LayoutChangeEvent, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { theme } from '../../constants/theme';
@@ -16,9 +16,15 @@ export function PlaybackProgressBar({
 }: PlaybackProgressBarProps) {
   const { progressMs } = usePlaybackProgress();
   const { chapter, audioDurationMs, seekTo } = usePlaybackSession();
-  const durationMs = Math.max(chapter.durationMs, audioDurationMs, 1);
+  const lastWordEndMs = chapter.sentences.at(-1)?.words.at(-1)?.end_ms ?? 0;
+  const durationMs = Math.max(chapter.durationMs, audioDurationMs, lastWordEndMs, 1);
+  const durationSv = useSharedValue(durationMs);
   const trackWidth = useSharedValue(0);
   const [layoutWidth, setLayoutWidth] = useState(0);
+
+  useEffect(() => {
+    durationSv.value = durationMs;
+  }, [durationMs, durationSv]);
 
   const handleLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -30,7 +36,8 @@ export function PlaybackProgressBar({
   );
 
   const fillStyle = useAnimatedStyle(() => {
-    const ratio = Math.min(1, Math.max(0, progressMs.value / durationMs));
+    const total = Math.max(durationSv.value, 1);
+    const ratio = Math.min(1, Math.max(0, progressMs.value / total));
     return {
       width: trackWidth.value * ratio,
     };

@@ -1,15 +1,60 @@
 import type { Chapter, Sentence, WordTimestamp } from '../types';
 import type { ChapterSyncAsset, SyncAssetSentence } from '../types/syncAsset';
 import type { IndexedWord } from '../types';
-import { repairSyncAsset } from './syncTimelineRepair';
+import { sha256Hex } from './sha256';
+import { hasTimelineGap, lastWordEndMs, repairSyncAsset } from './syncTimelineRepair';
 
-/** Sync JSON may store word times in file-audio coords (legacy) or visual coords (0 = chapter start). */
-export function usesLegacyAudioWordTimings(asset: ChapterSyncAsset): boolean {
+export interface SyncAssetRuntimeCheck {
+  ok: boolean;
+  reason?: string;
+}
+
+/** Verify committed sync JSON is safe to load without runtime repair. */
+export function checkSyncAssetReady(asset: ChapterSyncAsset): SyncAssetRuntimeCheck {
+  if (hasTimelineGap(asset)) {
+    return {
+      ok: false,
+      reason: 'Sync timeline gap detected — run npm run repair:sync and re-seed.',
+    };
+  }
+  if (resolveTimelineCoords(asset) === 'file_absolute') {
+    return {
+      ok: false,
+      reason: 'Sync uses legacy file coordinates — run npm run repair:sync and re-seed.',
+    };
+  }
+  return { ok: true };
+}
+
+/** Repair gap-broken sync at load time so karaoke works without a manual rebuild. */
+export function normalizeSyncAssetForRuntime(asset: ChapterSyncAsset): ChapterSyncAsset {
+  if (!hasTimelineGap(asset)) return asset;
+
+  const { asset: repaired } = repairSyncAsset(asset);
+  return {
+    ...repaired,
+    timeline_coords: 'visual',
+  };
+}
+
+/** Resolve word time coordinate system for a sync asset. */
+export function resolveTimelineCoords(
+  asset: ChapterSyncAsset,
+): 'visual' | 'file_absolute' {
+  if (asset.timeline_coords === 'visual' || asset.timeline_coords === 'file_absolute') {
+    return asset.timeline_coords;
+  }
+
   const offset = asset.audio_offset_ms;
-  if (offset <= 0) return false;
+  if (offset <= 0) return 'visual';
   const first = asset.sentences[0]?.words[0]?.s;
-  if (first === undefined) return false;
-  return first >= offset * 0.5;
+  if (first === undefined) return 'visual';
+  return first >= offset * 0.5 ? 'file_absolute' : 'visual';
+}
+
+/** @deprecated Use resolveTimelineCoords — kept for tests and legacy assets. */
+export function usesLegacyAudioWordTimings(asset: ChapterSyncAsset): boolean {
+  return resolveTimelineCoords(asset) === 'file_absolute';
 }
 
 /** Expand minified sync asset into runtime chapter sentences. */
@@ -26,11 +71,14 @@ export function syncAssetToChapter(
     durationMs?: number;
   },
 ): Chapter {
-  const { asset: repaired } = repairSyncAsset(asset);
-  const legacyTimings = usesLegacyAudioWordTimings(repaired);
-  const offset = repaired.audio_offset_ms;
+  const runtimeAsset = normalizeSyncAssetForRuntime(asset);
+  const syncReady = !hasTimelineGap(runtimeAsset);
+
+  const coords = resolveTimelineCoords(runtimeAsset);
+  const legacyTimings = coords === 'file_absolute';
+  const offset = runtimeAsset.audio_offset_ms;
   let globalWordIndex = 0;
-  const sentences: Sentence[] = repaired.sentences.map((block) => {
+  const sentences: Sentence[] = runtimeAsset.sentences.map((block) => {
     const words: WordTimestamp[] = block.words.map((entry) => {
       const startMs = legacyTimings ? entry.s - offset : entry.s;
       const endMs = legacyTimings ? entry.e - offset : entry.e;
@@ -53,13 +101,12 @@ export function syncAssetToChapter(
     };
   });
 
-  const lastWord = sentences.at(-1)?.words.at(-1);
-  const rawDuration = meta.durationMs ?? lastWord?.end_ms ?? 0;
+  const rawDuration = meta.durationMs ?? lastWordEndMs(runtimeAsset);
   const durationMs =
     legacyTimings && rawDuration > offset ? rawDuration - offset : rawDuration;
 
   return {
-    slug: repaired.chapter_slug,
+    slug: runtimeAsset.chapter_slug,
     bookSlug: meta.bookSlug,
     title: meta.title,
     chapterIndex: meta.chapterIndex,
@@ -68,9 +115,10 @@ export function syncAssetToChapter(
     sentences,
     audioPath: meta.audioPath,
     syncMetadataPath: meta.syncMetadataPath,
-    audioOffsetMs: repaired.audio_offset_ms,
+    audioOffsetMs: runtimeAsset.audio_offset_ms,
     syncHash: meta.syncHash,
-    syncVersion: repaired.sync_version,
+    syncVersion: runtimeAsset.sync_version,
+    syncReady,
   };
 }
 
@@ -89,6 +137,7 @@ export function chapterToSyncAsset(chapter: Chapter): ChapterSyncAsset {
     chapter_slug: chapter.slug,
     sync_version: chapter.syncVersion,
     audio_offset_ms: chapter.audioOffsetMs,
+    timeline_coords: 'visual',
     sentences,
   };
 }
@@ -118,19 +167,18 @@ export function visualToAudioMs(visualMs: number, audioOffsetMs: number): number
   return visualMs + audioOffsetMs;
 }
 
-/** Deterministic hash for sync cache invalidation (replace with SHA-256 in pipeline). */
-export function hashSyncAsset(asset: ChapterSyncAsset): string {
-  const payload = JSON.stringify({
+function canonicalSyncPayload(asset: ChapterSyncAsset): string {
+  return JSON.stringify({
+    schema_version: asset.schema_version,
     chapter_slug: asset.chapter_slug,
     sync_version: asset.sync_version,
-    sentence_count: asset.sentences.length,
-    first_word: asset.sentences[0]?.words[0]?.w ?? '',
-    last_end: asset.sentences.at(-1)?.end_ms ?? 0,
+    audio_offset_ms: asset.audio_offset_ms,
+    timeline_coords: asset.timeline_coords ?? resolveTimelineCoords(asset),
+    sentences: asset.sentences,
   });
-  let hash = 0;
-  for (let i = 0; i < payload.length; i += 1) {
-    hash = (hash << 5) - hash + payload.charCodeAt(i);
-    hash |= 0;
-  }
-  return `h${Math.abs(hash).toString(16)}`;
+}
+
+/** SHA-256 hash for sync cache invalidation. */
+export function hashSyncAsset(asset: ChapterSyncAsset): string {
+  return sha256Hex(canonicalSyncPayload(asset));
 }

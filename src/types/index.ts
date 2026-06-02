@@ -30,6 +30,8 @@ export interface Chapter {
   audioOffsetMs: number;
   syncHash: string;
   syncVersion: number;
+  /** False when sync JSON needs offline repair before karaoke can be trusted. */
+  syncReady?: boolean;
   /** Storage path in `text/` bucket (production reading payload). */
   textMetadataPath?: string;
   textHash?: string;

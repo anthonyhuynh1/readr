@@ -1,6 +1,7 @@
-import { seededBooks, getBundledSyncAsset } from '../../data/mockChapter';
+import { seededBooks } from '../../data/mockChapter';
+import { getBundledSyncAsset } from '../../data/bundledSyncAssets';
 import type { Book, BookCatalogItem, Chapter } from '../../types';
-import { syncAssetToChapter } from '../../utils/syncAsset';
+import { hashSyncAsset, syncAssetToChapter } from '../../utils/syncAsset';
 import { loadChapterSyncAsset } from '../sync/cache';
 import { hasSupabaseConfig } from '../../config/env';
 import { getContentSources } from '../../store/useContentStore';
@@ -56,9 +57,10 @@ function mapCatalogFromSeed(): BookCatalogItem[] {
 
 async function hydrateChapterFromSeed(book: Book, chapter: Chapter): Promise<Chapter> {
   const bundled = getBundledSyncAsset(chapter);
+  const syncHash = hashSyncAsset(bundled);
   const { asset } = await loadChapterSyncAsset(chapter.slug, {
-    syncHash: chapter.syncHash,
-    syncVersion: chapter.syncVersion,
+    syncHash,
+    syncVersion: bundled.sync_version,
     bundledAsset: bundled,
   });
 
@@ -69,7 +71,7 @@ async function hydrateChapterFromSeed(book: Book, chapter: Chapter): Promise<Cha
     pageNumber: chapter.pageNumber,
     audioPath: chapter.audioPath,
     syncMetadataPath: chapter.syncMetadataPath,
-    syncHash: chapter.syncHash,
+    syncHash,
     durationMs: chapter.durationMs,
   });
 }

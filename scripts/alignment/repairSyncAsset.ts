@@ -18,11 +18,14 @@ function main(): void {
   }
 
   const asset = JSON.parse(readFileSync(syncPath, 'utf8')) as ChapterSyncAsset;
-  const { asset: repaired, gapRepaired, monotonicFixes, offsetBumpMs } = repairSyncAsset(asset);
+  const { asset: repaired, gapRepaired, offsetMigrated, interSentenceGapsClosed, monotonicFixes, offsetBumpMs } =
+    repairSyncAsset(asset);
 
   writeFileSync(syncPath, `${JSON.stringify(repaired, null, 2)}\n`, 'utf8');
   console.log(`Repaired ${syncPath}`);
   console.log(`  gap repair:      ${gapRepaired ? 'yes' : 'no'}`);
+  console.log(`  offset migrate:  ${offsetMigrated ? 'yes' : 'no'}`);
+  console.log(`  sentence gaps:   ${interSentenceGapsClosed}`);
   console.log(`  offset bump ms:  ${offsetBumpMs}`);
   console.log(`  timing fixes:    ${monotonicFixes}`);
   console.log(`  audio_offset_ms: ${repaired.audio_offset_ms}`);

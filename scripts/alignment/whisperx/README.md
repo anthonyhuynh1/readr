@@ -32,6 +32,9 @@ npm run seed:supabase
 
 ## Coordinate contract
 
+- **One align block = one paragraph** from `mockBook.json` / text asset (via `npm run align:extract`)
+- Long literary paragraphs may produce blocks with 80+ words — `validate:sync` warns but does not fail
 - Word `{ s, e }` = **visual timeline** (0 = first spoken word of chapter)
 - `audio_offset_ms` = file seek position (includes 250ms pre-roll before first word)
 - App player auto-seeks to `audio_offset_ms` on load
+- **Runtime repair is not applied in the app** — run `npm run repair:sync` before seeding/bundling

@@ -1,4 +1,5 @@
 import { Audio, type AVPlaybackStatus } from 'expo-av';
+import { INTRO_PRE_ROLL_MS } from '../../utils/syncTimelineRepair';
 import { audioToVisualMs, visualToAudioMs } from '../../utils/syncAsset';
 
 let audioModeReady = false;
@@ -97,8 +98,9 @@ export class ChapterAudioPlayer {
     const status = await this.sound.getStatusAsync();
     if (status.isLoaded && this.audioOffsetMs > 0) {
       const pos = status.positionMillis ?? 0;
-      if (pos < this.audioOffsetMs - 50) {
-        await this.sound.setPositionAsync(this.audioOffsetMs);
+      const seekTarget = Math.max(0, this.audioOffsetMs - INTRO_PRE_ROLL_MS);
+      if (pos < seekTarget - 50) {
+        await this.sound.setPositionAsync(seekTarget);
         this.onVisualPosition(0);
       }
     }

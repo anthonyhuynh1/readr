@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react';
 import { usePlaybackProgress } from '../store/ProgressProvider';
 
-/** Coarse playback clock for UI labels (~20 Hz) without full context re-renders. */
-export function useCoarseSyncTime(intervalMs = 50): number {
+/** Throttled playback clock for transport labels (~4 Hz). */
+export function useCoarseSyncTime(intervalMs = 250): number {
   const { progressMs } = usePlaybackProgress();
   const [timeMs, setTimeMs] = useState(0);
 
   useEffect(() => {
-    setTimeMs(progressMs.value);
-    const id = setInterval(() => {
-      setTimeMs(progressMs.value);
-    }, intervalMs);
+    const tick = () => setTimeMs(progressMs.value);
+    tick();
+    const id = setInterval(tick, intervalMs);
     return () => clearInterval(id);
   }, [progressMs, intervalMs]);
 

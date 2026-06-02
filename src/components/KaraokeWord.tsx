@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { theme } from '../constants/theme';
 import { usePlaybackProgress } from '../store/ProgressProvider';
 import type { WordTimestamp } from '../types';
-import { getWordFillProgress } from '../utils/karaoke';
 
 interface KaraokeWordProps {
   word: WordTimestamp;
@@ -20,9 +19,9 @@ function estimateWordWidth(label: string): number {
 
 /**
  * Dual-layer word: base text with an orange overlay clipped to playback progress.
- * Progress reads from a Reanimated SharedValue to avoid React re-renders at 60 Hz.
+ * All math inside useAnimatedStyle is inlined — no JS-thread helpers (iOS crash).
  */
-export function KaraokeWord({
+export const KaraokeWord = memo(function KaraokeWord({
   word,
   isKaraokeActive,
   trailingSpace,
@@ -32,16 +31,31 @@ export function KaraokeWord({
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const suffix = trailingSpace ? ' ' : '';
   const label = `${word.word}${suffix}`;
+  const startMs = word.start_ms;
+  const endMs = word.end_ms;
+  const fallbackWidth = useMemo(() => estimateWordWidth(label), [label]);
+  const clipBasisWidth = measuredWidth > 0 ? measuredWidth : fallbackWidth;
+
+  useEffect(() => {
+    setMeasuredWidth(0);
+  }, [word.index, startMs, endMs, word.word]);
 
   const clipStyle = useAnimatedStyle(() => {
     if (!isKaraokeActive) {
       return { width: 0 };
     }
 
-    const fill = getWordFillProgress(progressMs.value, word);
-    const width = measuredWidth > 0 ? measuredWidth : estimateWordWidth(label);
-    return { width: width * fill };
-  }, [isKaraokeActive, measuredWidth, label, word.start_ms, word.end_ms]);
+    const timeMs = progressMs.value;
+    let fill = 0;
+    if (timeMs >= endMs) {
+      fill = 1;
+    } else if (timeMs > startMs) {
+      const duration = endMs - startMs;
+      fill = duration > 0 ? (timeMs - startMs) / duration : 1;
+    }
+
+    return { width: clipBasisWidth * fill };
+  }, [isKaraokeActive, clipBasisWidth, startMs, endMs]);
 
   return (
     <Pressable onPress={onPress} hitSlop={4} style={styles.hit}>
@@ -49,21 +63,23 @@ export function KaraokeWord({
         style={styles.wordShell}
         onLayout={(event) => {
           const next = event.nativeEvent.layout.width;
-          if (next > 0) setMeasuredWidth(next);
+          if (next > 0 && Math.abs(next - measuredWidth) > 0.5) {
+            setMeasuredWidth(next);
+          }
         }}
       >
         <Text style={styles.base}>{label}</Text>
-        {isKaraokeActive && (
+        {isKaraokeActive ? (
           <Animated.View style={[styles.clip, clipStyle]}>
-            <Text style={[styles.base, styles.sung, { width: measuredWidth || estimateWordWidth(label) }]}>
+            <Text style={[styles.base, styles.sung, { width: clipBasisWidth }]}>
               {label}
             </Text>
           </Animated.View>
-        )}
+        ) : null}
       </View>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   hit: {

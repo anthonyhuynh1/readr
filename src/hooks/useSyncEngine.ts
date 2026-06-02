@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
-import { usePlayback } from '../context/PlaybackContext';
+import { usePlaybackSession } from '../context/PlaybackContext';
+import { useCoarseSyncTime } from './useCoarseSyncTime';
+import { usePlaybackStore } from '../store/usePlaybackStore';
 import { findActiveWord } from '../utils/syncEngine';
 import type { WordTimestamp } from '../types';
 
 /** Resolve sentence object from chapter using sentenceIndex. */
 function resolveSentence(
-  chapter: ReturnType<typeof usePlayback>['chapter'],
+  chapter: ReturnType<typeof usePlaybackSession>['chapter'],
   sentenceIndex: number,
 ) {
   if (sentenceIndex < 0 || sentenceIndex >= chapter.sentences.length) {
@@ -26,15 +28,19 @@ export interface SyncEngineResult {
 }
 
 /**
- * Evaluates which word and sentence are active from the coarse sync clock.
- * Karaoke fill runs on the UI thread via Reanimated SharedValue separately.
+ * Sentence index comes from UI-thread ActiveSentenceSync (Zustand).
+ * Word-level detail uses a coarse transport clock (~4 Hz).
  */
 export function useSyncEngine(): SyncEngineResult {
-  const { chapter, wordIndex, syncTimeMs } = usePlayback();
+  const { chapter, wordIndex } = usePlaybackSession();
+  const activeSentenceIndex = usePlaybackStore((s) => s.activeSentenceIndex);
+  const syncTimeMs = useCoarseSyncTime(250);
 
   return useMemo(() => {
     const position = findActiveWord(wordIndex, syncTimeMs);
-    const activeSentence = resolveSentence(chapter, position.sentenceIndex);
+    const sentenceIndex =
+      activeSentenceIndex >= 0 ? activeSentenceIndex : position.sentenceIndex;
+    const activeSentence = resolveSentence(chapter, sentenceIndex);
     const word: WordTimestamp | null = position.word;
 
     const isWithinWord =
@@ -53,13 +59,16 @@ export function useSyncEngine(): SyncEngineResult {
 
     return {
       ...position,
+      sentenceIndex,
+      wordIndex: position.wordIndex,
       sentence: activeSentence,
       activeSentence,
+      word,
       isWithinWord,
       wordProgress,
       globalWordIndex: word?.index ?? -1,
     };
-  }, [chapter, wordIndex, syncTimeMs]);
+  }, [chapter, wordIndex, syncTimeMs, activeSentenceIndex]);
 }
 
 export { findActiveWord };

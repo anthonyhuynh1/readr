@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "chapter_slug": "the-great-gatsby-ch-1",
-  "sync_version": 2,
+  "sync_version": 3,
   "audio_offset_ms": 22287,
   "sentences": [
     {
@@ -30660,5 +30660,6 @@
         }
       ]
     }
-  ]
+  ],
+  "timeline_coords": "visual"
 }

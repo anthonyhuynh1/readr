@@ -1,6 +1,5 @@
 import type { Book, Chapter } from '../types';
-import type { ChapterSyncAsset } from '../types/syncAsset';
-import { buildWordIndex, chapterToSyncAsset } from '../utils/syncAsset';
+import { buildWordIndex } from '../utils/syncAsset';
 import {
   buildChapterFromParagraphs,
   DEFAULT_LIBRIVOX_OFFSET_MS,
@@ -192,9 +191,7 @@ export const seededBooks: Book[] = [
   },
 ];
 
-export function getBundledSyncAsset(chapter: Chapter): ChapterSyncAsset {
-  return chapterToSyncAsset(chapter);
-}
+export { getBundledSyncAsset, hasBundledWhisperXSync } from './bundledSyncAssets';
 
 export { buildWordIndex };
 

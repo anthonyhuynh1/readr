@@ -4,9 +4,12 @@ declare const Deno: {
   serve: (handler: (request: Request) => Promise<Response>) => void;
 };
 
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 interface AskAiPayload {
@@ -16,6 +19,13 @@ interface AskAiPayload {
   sentence_text: string;
   surrounding_sentences: string[];
   user_prompt: string;
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 }
 
 async function callOpenAi(payload: AskAiPayload): Promise<string> {
@@ -60,33 +70,63 @@ async function callOpenAi(payload: AskAiPayload): Promise<string> {
   return data.choices?.[0]?.message?.content ?? 'No response available.';
 }
 
+async function verifyJwt(request: Request): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return { ok: false, status: 401, message: 'Missing Authorization bearer token' };
+  }
+
+  const jwt = authHeader.slice('Bearer '.length).trim();
+  if (!jwt) {
+    return { ok: false, status: 401, message: 'Missing Authorization bearer token' };
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return { ok: false, status: 500, message: 'Supabase auth is not configured' };
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  });
+
+  const { data, error } = await supabase.auth.getUser(jwt);
+  if (error || !data.user) {
+    return { ok: false, status: 401, message: 'Invalid or expired session' };
+  }
+
+  return { ok: true };
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  if (request.method !== 'POST') {
+    return jsonResponse({ error: 'Method not allowed' }, 405);
+  }
+
+  const auth = await verifyJwt(request);
+  if (!auth.ok) {
+    return jsonResponse({ error: auth.message }, auth.status);
   }
 
   try {
     const payload = (await request.json()) as AskAiPayload;
     const answer = await callOpenAi(payload);
-    return new Response(
-      JSON.stringify({
-        answer,
-        thread_id: `thread-${payload.chapter_slug}`,
-        message_id: `msg-${Date.now()}`,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
-    );
+    return jsonResponse({
+      answer,
+      thread_id: `thread-${payload.chapter_slug}`,
+      message_id: `msg-${Date.now()}`,
+    });
   } catch (error) {
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }),
+    return jsonResponse(
       {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        error: error instanceof Error ? error.message : 'Unknown error',
       },
+      500,
     );
   }
 });

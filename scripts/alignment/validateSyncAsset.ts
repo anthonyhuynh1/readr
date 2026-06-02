@@ -18,7 +18,16 @@ export interface SyncValidationResult {
   ok: boolean;
   errors: string[];
   warnings: string[];
+  stats?: {
+    blockCount: number;
+    wordCount: number;
+    maxWordsInBlock: number;
+    maxWordsBlockId: string;
+  };
 }
+
+/** Warn when a paragraph block exceeds this — karaoke is active-row only but long blocks stress alignment. */
+export const MAX_WORDS_PER_BLOCK_WARN = 80;
 
 const TIME_EPSILON_MS = 5;
 
@@ -108,10 +117,34 @@ export function validateSyncAsset(
   }
 
   if (hasTimelineGap(asset)) {
-    warnings.push(
-      'timeline gap between sentence 0 and 1 — run npm run repair:sync or reload app (auto-repair at runtime)',
+    errors.push(
+      'timeline gap between sentence 0 and 1 — run npm run repair:sync before shipping',
     );
   }
+
+  let maxWordsInBlock = 0;
+  let maxWordsBlockId = '';
+  let wordCount = 0;
+  for (const sentence of asset.sentences) {
+    const count = sentence.words.length;
+    wordCount += count;
+    if (count > maxWordsInBlock) {
+      maxWordsInBlock = count;
+      maxWordsBlockId = sentence.sentence_id;
+    }
+    if (count > MAX_WORDS_PER_BLOCK_WARN) {
+      warnings.push(
+        `block ${sentence.sentence_id} has ${count} words (>${MAX_WORDS_PER_BLOCK_WARN}) — long paragraph; verify alignment quality`,
+      );
+    }
+  }
+
+  const stats = {
+    blockCount: asset.sentences.length,
+    wordCount,
+    maxWordsInBlock,
+    maxWordsBlockId,
+  };
 
   if (alignInput) {
     if (asset.chapter_slug !== alignInput.chapter_slug) {
@@ -168,7 +201,7 @@ export function validateSyncAsset(
     }
   }
 
-  return { ok: errors.length === 0, errors, warnings };
+  return { ok: errors.length === 0, errors, warnings, stats };
 }
 
 function parseArgs(): { syncPath: string; alignPath: string | null } {
@@ -231,6 +264,12 @@ function main(): void {
   console.log(`  sentences:        ${asset.sentences.length}`);
   console.log(`  words:            ${wordCount}`);
   console.log(`  duration_ms:      ${asset.sentences.at(-1)?.end_ms ?? 0}`);
+  if (result.stats) {
+    console.log(`  max words/block:  ${result.stats.maxWordsInBlock} (${result.stats.maxWordsBlockId})`);
+  }
+  if (alignInput) {
+    console.log(`  align blocks:     ${alignInput.sentences.length}`);
+  }
 
   const pending = chapterMediaManifest.filter(
     (entry) => !existsSync(resolveRepoPath(entry.syncOutputPath)),
