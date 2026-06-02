@@ -10,15 +10,14 @@ import { ScreenShell } from '../ScreenShell';
 import { BookmarksPanel } from '../BookmarksPanel';
 import { theme } from '../../constants/theme';
 import { usePlaybackSession } from '../../context/PlaybackContext';
-import { useCoarseSyncTime } from '../../hooks/useCoarseSyncTime';
 import {
   usePlaybackStore,
   type PlaybackSpeed,
 } from '../../store/usePlaybackStore';
-import { formatPlaybackTime } from '../../utils/formatTime';
 import { BookCoverImage } from './BookCoverImage';
 import { ChapterTOCModal } from './ChapterTOCModal';
 import { ChapterTitleButton } from './ChapterTitleButton';
+import { PlaybackTransport } from './PlaybackTransport';
 import { ReadModeBar, type ReadViewMode } from './ReadModeBar';
 import { SpeedPickerModal } from './SpeedPickerModal';
 
@@ -35,8 +34,8 @@ function IconButton({
   onPress: () => void;
 }) {
   return (
-    <Pressable style={styles.iconButton} onPress={onPress} hitSlop={12}>
-      <Text style={styles.iconButtonText}>{label}</Text>
+    <Pressable style={styles.headerBtn} onPress={onPress} hitSlop={12}>
+      <Text style={styles.headerBtnText}>{label}</Text>
     </Pressable>
   );
 }
@@ -48,11 +47,6 @@ function AudiobookListenViewInner({
   const {
     book,
     chapter,
-    togglePlay,
-    audioDurationMs,
-    audioError,
-    skipBack15,
-    skipForward15,
     goToPrevChapter,
     goToNextChapter,
     selectChapter,
@@ -61,19 +55,13 @@ function AudiobookListenViewInner({
     hasNextChapter,
   } = usePlaybackSession();
 
-  const isPlaying = usePlaybackStore((s) => s.isPlaying);
   const isSwitchingChapter = usePlaybackStore((s) => s.isSwitchingChapter);
   const playbackRate = usePlaybackStore((s) => s.playbackRate);
   const setPlaybackRate = usePlaybackStore((s) => s.setPlaybackRate);
 
-  const syncTimeMs = useCoarseSyncTime();
   const [showTOC, setShowTOC] = useState(false);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showSpeedPicker, setShowSpeedPicker] = useState(false);
-
-  const durationMs = Math.max(audioDurationMs, chapter.durationMs, 1);
-  const progress = Math.min(1, syncTimeMs / durationMs);
-  const remainingMs = Math.max(0, durationMs - syncTimeMs);
 
   const handleShare = async () => {
     await Share.share({
@@ -87,9 +75,16 @@ function AudiobookListenViewInner({
   };
 
   return (
-    <ScreenShell style={styles.root}>
+    <ScreenShell style={styles.root} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <IconButton label="←" onPress={onBackToLibrary} />
+        <View style={styles.headerCenter}>
+          <ChapterTitleButton
+            title={chapter.title}
+            onPress={() => setShowTOC(true)}
+            loading={isSwitchingChapter}
+          />
+        </View>
         <View style={styles.headerRight}>
           <IconButton label="☑" onPress={() => setShowBookmarks(true)} />
           <IconButton label="↗" onPress={() => void handleShare()} />
@@ -107,55 +102,27 @@ function AudiobookListenViewInner({
 
         <Text style={styles.title}>{book.title}</Text>
         <Text style={styles.author}>by {book.author}</Text>
-
-        <View style={styles.chapterRow}>
-          <ChapterTitleButton
-            variant="inline"
-            title={chapter.title}
-            onPress={() => setShowTOC(true)}
-            loading={isSwitchingChapter}
-          />
-        </View>
       </View>
 
-      <View style={styles.transport}>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-        </View>
-        <View style={styles.timeRow}>
-          <Text style={styles.time}>{formatPlaybackTime(syncTimeMs)}</Text>
-          <Text style={styles.time}>-{formatPlaybackTime(remainingMs)}</Text>
-        </View>
-
-        {audioError ? <Text style={styles.audioError}>{audioError}</Text> : null}
-
-        <View style={styles.controls}>
+      <View style={styles.footer}>
+        <View style={styles.chapterSkipRow}>
           <Pressable
-            style={[styles.controlBtn, !hasPrevChapter && styles.controlBtnDisabled]}
+            style={[styles.chapterSkipBtn, !hasPrevChapter && styles.chapterSkipBtnDisabled]}
             onPress={() => void goToPrevChapter()}
             disabled={!hasPrevChapter}
           >
-            <Text style={styles.controlIcon}>⏮</Text>
-          </Pressable>
-          <Pressable style={styles.controlBtn} onPress={() => void skipBack15()}>
-            <Text style={styles.skipLabel}>15</Text>
-            <Text style={styles.controlIconSmall}>↺</Text>
-          </Pressable>
-          <Pressable style={styles.playBtn} onPress={() => void togglePlay()}>
-            <Text style={styles.playIcon}>{isPlaying ? '❚❚' : '▶'}</Text>
-          </Pressable>
-          <Pressable style={styles.controlBtn} onPress={() => void skipForward15()}>
-            <Text style={styles.skipLabel}>15</Text>
-            <Text style={styles.controlIconSmall}>↻</Text>
+            <Text style={styles.chapterSkipText}>Previous chapter</Text>
           </Pressable>
           <Pressable
-            style={[styles.controlBtn, !hasNextChapter && styles.controlBtnDisabled]}
+            style={[styles.chapterSkipBtn, !hasNextChapter && styles.chapterSkipBtnDisabled]}
             onPress={() => void goToNextChapter()}
             disabled={!hasNextChapter}
           >
-            <Text style={styles.controlIcon}>⏭</Text>
+            <Text style={styles.chapterSkipText}>Next chapter</Text>
           </Pressable>
         </View>
+
+        <PlaybackTransport compact />
 
         <ReadModeBar
           mode="listen"
@@ -190,51 +157,58 @@ export const AudiobookListenView = memo(AudiobookListenViewInner);
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#f4f4f0',
-    paddingHorizontal: theme.spacing.lg,
+    backgroundColor: theme.colors.surface,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
   },
-  headerRight: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
-  iconButton: {
+  headerBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: theme.colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  iconButtonText: {
+  headerBtnText: {
     fontSize: 18,
     color: theme.colors.trueBlack,
+  },
+  headerCenter: {
+    flex: 1,
+    paddingHorizontal: theme.spacing.sm,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
   },
   body: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingBottom: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
   },
   coverFrame: {
-    width: 240,
-    height: 240,
+    width: 220,
+    height: 220,
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: theme.colors.white,
     marginBottom: theme.spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   title: {
     fontSize: 22,
@@ -246,86 +220,37 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.xs,
     fontSize: 14,
     color: theme.colors.dimmedText,
+    textAlign: 'center',
   },
-  chapterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: theme.spacing.lg,
-    maxWidth: '100%',
-    width: '100%',
-    paddingHorizontal: theme.spacing.sm,
-  },
-  transport: {
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
     paddingBottom: theme.spacing.sm,
+    gap: theme.spacing.sm,
   },
-  progressTrack: {
-    height: 4,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: theme.colors.brandOrange,
-  },
-  timeRow: {
+  chapterSkipRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: theme.spacing.sm,
-    marginBottom: theme.spacing.md,
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
   },
-  time: {
+  chapterSkipBtn: {
+    flex: 1,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    alignItems: 'center',
+  },
+  chapterSkipBtnDisabled: {
+    opacity: 0.35,
+  },
+  chapterSkipText: {
     fontSize: 12,
+    fontWeight: '600',
     color: theme.colors.dimmedText,
-    fontVariant: ['tabular-nums'],
-  },
-  audioError: {
-    color: '#b00020',
-    fontSize: 12,
-    textAlign: 'center',
-    marginBottom: theme.spacing.sm,
-  },
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.md,
-    marginBottom: theme.spacing.sm,
-  },
-  controlBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  controlBtnDisabled: {
-    opacity: 0.25,
-  },
-  controlIcon: {
-    fontSize: 22,
-    color: theme.colors.trueBlack,
-  },
-  controlIconSmall: {
-    fontSize: 14,
-    color: theme.colors.trueBlack,
-  },
-  skipLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: theme.colors.dimmedText,
-    position: 'absolute',
-    top: 6,
-  },
-  playBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: theme.colors.trueBlack,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playIcon: {
-    color: theme.colors.white,
-    fontSize: 22,
   },
 });

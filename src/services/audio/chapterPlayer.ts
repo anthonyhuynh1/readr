@@ -88,14 +88,20 @@ export class ChapterAudioPlayer {
       this.onDuration(visualDuration);
     }
 
-    if (this.audioOffsetMs > 0) {
-      await sound.setPositionAsync(this.audioOffsetMs);
-      this.onVisualPosition(0);
-    }
+    // Keep file at 0 until play — seek past intro on first play so progress/karaoke stay at 0.
+    this.onVisualPosition(0);
   }
 
   async play(): Promise<void> {
     if (!this.sound) return;
+    const status = await this.sound.getStatusAsync();
+    if (status.isLoaded && this.audioOffsetMs > 0) {
+      const pos = status.positionMillis ?? 0;
+      if (pos < this.audioOffsetMs - 50) {
+        await this.sound.setPositionAsync(this.audioOffsetMs);
+        this.onVisualPosition(0);
+      }
+    }
     await this.sound.playAsync();
   }
 

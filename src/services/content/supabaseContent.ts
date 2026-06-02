@@ -1,4 +1,5 @@
 import { getBookCoverUrl } from '../../data/bookCovers';
+import { resolveAudioOffsetMs } from '../../data/chapterMediaOverrides';
 import { env, hasSupabaseConfig } from '../../config/env';
 import { getSupabaseClient } from '../supabase/client';
 import { loadChapterSyncAsset } from '../sync/cache';
@@ -74,7 +75,7 @@ function mapDbChapter(row: DbChapter): Omit<Chapter, 'sentences'> {
     durationMs: row.duration_ms,
     audioPath: row.audio_path,
     syncMetadataPath: row.sync_metadata_path,
-    audioOffsetMs: row.audio_offset_ms,
+    audioOffsetMs: resolveAudioOffsetMs(row.slug, row.audio_offset_ms),
     syncHash: row.sync_hash,
     syncVersion: row.sync_version,
     textMetadataPath: row.text_metadata_path || undefined,
@@ -99,7 +100,9 @@ async function applySyncTimings(
 
   if (asset.sentences.length === 0) return chapter;
 
-  return syncAssetToChapter(asset, {
+  return syncAssetToChapter(
+    { ...asset, audio_offset_ms: resolveAudioOffsetMs(dbChapter.slug, asset.audio_offset_ms) },
+    {
     bookSlug,
     title: dbChapter.title,
     chapterIndex: dbChapter.chapter_index,

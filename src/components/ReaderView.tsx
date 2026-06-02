@@ -62,7 +62,7 @@ const SentenceRow = memo(function SentenceRow({
             <KaraokeWord
               key={`${sentence.id}-w-${word.index}`}
               word={word}
-              isKaraokeActive={isActiveSentence && isImmersive}
+              isKaraokeActive={isImmersive}
               trailingSpace={wi < sentence.words.length - 1}
               onPress={() => {
                 if (longPress.consumeIfTriggered()) return;
@@ -87,7 +87,6 @@ export function ReaderView() {
     book,
     userId,
     isImmersive,
-    isPlaying,
     audioError,
     seekToWord,
     addBookmark,
@@ -98,7 +97,7 @@ export function ReaderView() {
 
   const { sentenceIndex: activeSentenceIndex } = useSyncEngine();
 
-  const karaokeWords = isImmersive && isPlaying && !audioError;
+  const karaokeEnabled = !audioError && isImmersive;
 
   const [popover, setPopover] = useState<{
     sentence: Sentence;
@@ -184,7 +183,7 @@ export function ReaderView() {
               sentence={sentence}
               isActiveSentence={si === activeSentenceIndex}
               isImmersive={isImmersive}
-              karaokeWords={karaokeWords}
+              karaokeWords={karaokeEnabled && si === activeSentenceIndex}
               onWordPress={handleWordPress}
               onSentenceLongPress={handleSentenceLongPress}
             />

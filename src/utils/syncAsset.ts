@@ -1,6 +1,7 @@
 import type { Chapter, Sentence, WordTimestamp } from '../types';
 import type { ChapterSyncAsset, SyncAssetSentence } from '../types/syncAsset';
 import type { IndexedWord } from '../types';
+import { repairSyncAsset } from './syncTimelineRepair';
 
 /** Sync JSON may store word times in file-audio coords (legacy) or visual coords (0 = chapter start). */
 export function usesLegacyAudioWordTimings(asset: ChapterSyncAsset): boolean {
@@ -25,10 +26,11 @@ export function syncAssetToChapter(
     durationMs?: number;
   },
 ): Chapter {
-  const legacyTimings = usesLegacyAudioWordTimings(asset);
-  const offset = asset.audio_offset_ms;
+  const { asset: repaired } = repairSyncAsset(asset);
+  const legacyTimings = usesLegacyAudioWordTimings(repaired);
+  const offset = repaired.audio_offset_ms;
   let globalWordIndex = 0;
-  const sentences: Sentence[] = asset.sentences.map((block) => {
+  const sentences: Sentence[] = repaired.sentences.map((block) => {
     const words: WordTimestamp[] = block.words.map((entry) => {
       const startMs = legacyTimings ? entry.s - offset : entry.s;
       const endMs = legacyTimings ? entry.e - offset : entry.e;
@@ -57,7 +59,7 @@ export function syncAssetToChapter(
     legacyTimings && rawDuration > offset ? rawDuration - offset : rawDuration;
 
   return {
-    slug: asset.chapter_slug,
+    slug: repaired.chapter_slug,
     bookSlug: meta.bookSlug,
     title: meta.title,
     chapterIndex: meta.chapterIndex,
@@ -66,9 +68,9 @@ export function syncAssetToChapter(
     sentences,
     audioPath: meta.audioPath,
     syncMetadataPath: meta.syncMetadataPath,
-    audioOffsetMs: asset.audio_offset_ms,
+    audioOffsetMs: repaired.audio_offset_ms,
     syncHash: meta.syncHash,
-    syncVersion: asset.sync_version,
+    syncVersion: repaired.sync_version,
   };
 }
 

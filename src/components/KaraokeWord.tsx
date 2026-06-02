@@ -4,6 +4,7 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { theme } from '../constants/theme';
 import { usePlaybackProgress } from '../store/ProgressProvider';
 import type { WordTimestamp } from '../types';
+import { getWordFillProgress } from '../utils/karaoke';
 
 interface KaraokeWordProps {
   word: WordTimestamp;
@@ -11,6 +12,10 @@ interface KaraokeWordProps {
   isKaraokeActive: boolean;
   trailingSpace: boolean;
   onPress: () => void;
+}
+
+function estimateWordWidth(label: string): number {
+  return Math.max(8, label.length * 10);
 }
 
 /**
@@ -29,31 +34,30 @@ export function KaraokeWord({
   const label = `${word.word}${suffix}`;
 
   const clipStyle = useAnimatedStyle(() => {
-    if (!isKaraokeActive || measuredWidth <= 0) {
+    if (!isKaraokeActive) {
       return { width: 0 };
     }
 
-    const timeMs = progressMs.value;
-    let fill = 0;
-    if (timeMs >= word.end_ms) fill = 1;
-    else if (timeMs > word.start_ms) {
-      const duration = word.end_ms - word.start_ms;
-      fill = duration > 0 ? (timeMs - word.start_ms) / duration : 1;
-    }
-
-    return { width: measuredWidth * fill };
-  }, [isKaraokeActive, measuredWidth, word.start_ms, word.end_ms]);
+    const fill = getWordFillProgress(progressMs.value, word);
+    const width = measuredWidth > 0 ? measuredWidth : estimateWordWidth(label);
+    return { width: width * fill };
+  }, [isKaraokeActive, measuredWidth, label, word.start_ms, word.end_ms]);
 
   return (
     <Pressable onPress={onPress} hitSlop={4} style={styles.hit}>
       <View
         style={styles.wordShell}
-        onLayout={(event) => setMeasuredWidth(event.nativeEvent.layout.width)}
+        onLayout={(event) => {
+          const next = event.nativeEvent.layout.width;
+          if (next > 0) setMeasuredWidth(next);
+        }}
       >
         <Text style={styles.base}>{label}</Text>
-        {isKaraokeActive && measuredWidth > 0 && (
+        {isKaraokeActive && (
           <Animated.View style={[styles.clip, clipStyle]}>
-            <Text style={[styles.base, styles.sung]}>{label}</Text>
+            <Text style={[styles.base, styles.sung, { width: measuredWidth || estimateWordWidth(label) }]}>
+              {label}
+            </Text>
           </Animated.View>
         )}
       </View>

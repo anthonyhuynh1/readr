@@ -40,7 +40,7 @@ import type {
   Sentence,
 } from '../types';
 
-const SYNC_UI_INTERVAL_MS = 100;
+const SYNC_UI_INTERVAL_MS = 50;
 const FALLBACK_TICK_MS = 16;
 const SKIP_MS = 15_000;
 
@@ -117,6 +117,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const setOpeningBook = usePlaybackStore((s) => s.setOpeningBook);
   const setSwitchingChapter = usePlaybackStore((s) => s.setSwitchingChapter);
   const setLoadedBookSlug = usePlaybackStore((s) => s.setLoadedBookSlug);
+  const setImmersive = usePlaybackStore((s) => s.setImmersive);
   const storeSetPlaybackRate = usePlaybackStore((s) => s.setPlaybackRate);
 
   const [books, setBooks] = useState<Book[]>([]);
@@ -402,9 +403,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const seekToWord = useCallback(
     async (startMs: number) => {
+      setImmersive(true);
       await seekTo(startMs);
+      if (!usePlaybackStore.getState().isPlaying && chapterAudioPlayer.isLoaded()) {
+        await play();
+      }
     },
-    [seekTo],
+    [play, seekTo, setImmersive],
   );
 
   const refreshCatalog = useCallback(async () => {
@@ -541,47 +546,35 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isPlaying || !useFallbackClock) {
-      clearFallbackTimer();
       return;
     }
-
-    syncUiRef.current = setInterval(() => {
-      setSyncTimeMs(progressMs.value);
-    }, SYNC_UI_INTERVAL_MS);
 
     fallbackRef.current = setInterval(() => {
       const next = Math.min(progressMs.value + FALLBACK_TICK_MS, timelineDurationMs);
       progressMs.value = next;
+      setSyncTimeMs(next);
       if (next >= timelineDurationMs) {
         setPlaying(false);
-        clearFallbackTimer();
       }
     }, FALLBACK_TICK_MS);
 
-    return clearFallbackTimer;
-  }, [
-    isPlaying,
-    useFallbackClock,
-    timelineDurationMs,
-    clearFallbackTimer,
-    progressMs,
-    setPlaying,
-  ]);
+    return () => {
+      if (fallbackRef.current) {
+        clearInterval(fallbackRef.current);
+        fallbackRef.current = null;
+      }
+    };
+  }, [isPlaying, useFallbackClock, timelineDurationMs, progressMs, setPlaying]);
 
   useEffect(() => {
-    if (!isPlaying || useFallbackClock) return;
+    if (useFallbackClock) return;
 
-    syncUiRef.current = setInterval(() => {
+    const id = setInterval(() => {
       setSyncTimeMs(progressMs.value);
     }, SYNC_UI_INTERVAL_MS);
 
-    return () => {
-      if (syncUiRef.current) {
-        clearInterval(syncUiRef.current);
-        syncUiRef.current = null;
-      }
-    };
-  }, [isPlaying, useFallbackClock, progressMs]);
+    return () => clearInterval(id);
+  }, [useFallbackClock, progressMs]);
 
   useEffect(() => {
     return () => {

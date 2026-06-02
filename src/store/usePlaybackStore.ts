@@ -46,12 +46,16 @@ export const usePlaybackStore = create<PlaybackStore>((set) => ({
       currentBookSlug: bookSlug,
       currentChapterSlug: chapterSlug,
       activeSentenceIndex: -1,
+      isImmersive: false,
     }),
   setLoadedBookSlug: (slug) => set({ loadedBookSlug: slug }),
   setOpeningBook: (opening) => set({ isOpeningBook: opening }),
   setSwitchingChapter: (switching) => set({ isSwitchingChapter: switching }),
   setPlaying: (playing) =>
-    set({ isPlaying: playing, isImmersive: playing }),
+    set((state) => ({
+      isPlaying: playing,
+      isImmersive: playing ? true : state.isImmersive,
+    })),
   setImmersive: (immersive) => set({ isImmersive: immersive }),
   setActiveSentenceIndex: (index) => set({ activeSentenceIndex: index }),
   setScrollTarget: (index) => set({ scrollToSentenceIndex: index }),

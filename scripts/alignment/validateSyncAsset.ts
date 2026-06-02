@@ -12,6 +12,7 @@ import {
   resolveRepoPath,
 } from './chapterMediaManifest';
 import type { ChapterAlignInput } from './extractChapterAlignInput';
+import { hasTimelineGap } from '../../src/utils/syncTimelineRepair';
 
 export interface SyncValidationResult {
   ok: boolean;
@@ -104,6 +105,12 @@ export function validateSyncAsset(
     if (Math.abs(sentence.end_ms - blockEnd) > TIME_EPSILON_MS) {
       errors.push(`sentence ${sentence.sentence_id} end_ms != last word e`);
     }
+  }
+
+  if (hasTimelineGap(asset)) {
+    warnings.push(
+      'timeline gap between sentence 0 and 1 — run npm run repair:sync or reload app (auto-repair at runtime)',
+    );
   }
 
   if (alignInput) {
