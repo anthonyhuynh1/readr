@@ -14,11 +14,15 @@ import {
   StyleSheet,
   Text,
   View,
+  Animated,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  type ViewToken,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as any as typeof FlashList;
 import { theme } from '../constants/theme';
 import { usePlaybackSession } from '../context/PlaybackContext';
 import { useAi } from '../context/AiContext';
@@ -28,27 +32,28 @@ import type { Sentence, WordTimestamp } from '../types';
 import { estimateRowHeight, getRowItemType } from '../utils/readerRowLayout';
 import { shouldShowWordKaraoke } from '../utils/readerViewUtils';
 import { useTextSelection } from '../hooks/useTextSelection';
-import { ParagraphRow } from './read/ParagraphRow';
+import { ParagraphRow, type SelectionRange } from './read/ParagraphRow';
 import { SelectionToolbar } from './read/SelectionToolbar';
 import { DefinitionCard } from './read/DefinitionCard';
+import { ReturnToSyncBtn } from './read/ReturnToSyncBtn';
+import { SelectionHandle } from './read/SelectionHandle';
 
-const FOLLOW_SCROLL_OFFSET = 120;
-const FOLLOW_PAUSE_MS = 8000;
 const SCROLL_RETRY_MS = 100;
 
 export function ReaderView() {
+  const [isUserScrolledAway, setIsUserScrolledAway] = React.useState(false);
+
   const listRef = useRef<FlashList<Sentence>>(null);
-  const followPausedUntilRef = useRef(0);
   const forceScrollRef = useRef(false);
-  const visibleIndicesRef = useRef<Set<number>>(new Set());
   const rowHeightCacheRef = useRef<Record<number, number>>({});
-  const rowLayoutsRef = useRef<Record<number, { y: number; height: number }>>({});
   const wordLayoutsRef = useRef<Record<number, Record<number, { x: number; y: number; width: number; height: number }>>>({});
   const scrollYRef = useRef(0);
+  const scrollYAnim = useRef(new Animated.Value(0)).current;
   
   // Track the container's window-Y so toolbar can be positioned correctly within it.
   const containerRef = useRef<View>(null);
   const containerTopRef = useRef(0);
+  const containerHeightRef = useRef(800); // sensible default before measure
 
   const {
     chapter,
@@ -86,7 +91,8 @@ export function ReaderView() {
     updateSelectionRange,
   } = useTextSelection();
 
-  const handleContainerLayout = useCallback(() => {
+  const handleContainerLayout = useCallback((event: LayoutChangeEvent) => {
+    containerHeightRef.current = event.nativeEvent.layout.height;
     // Measure the container's Y position in window coords so we can convert
     // word anchorY (window-absolute) into container-relative coords for the toolbar.
     containerRef.current?.measureInWindow((_x, y) => {
@@ -112,25 +118,34 @@ export function ReaderView() {
 
       let targetSentenceIndex = -1;
       let minDiff = Infinity;
+      let targetRowY = 0;
+      
+      // Start accumulating Y from top padding
+      let currentY = theme.spacing.xl;
 
-      // Find the sentence under the finger
+      // Find the sentence under the finger by accumulating row heights
       for (let i = 0; i < chapter.sentences.length; i++) {
-        const layout = rowLayoutsRef.current[i];
-        if (!layout) continue;
+        const height = rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i]);
+        const rowY = currentY;
+        const rowBottom = currentY + height;
 
-        if (contentY >= layout.y && contentY <= layout.y + layout.height) {
+        if (contentY >= rowY && contentY <= rowBottom) {
           targetSentenceIndex = i;
+          targetRowY = rowY;
           break;
         }
 
         const diff = Math.min(
-          Math.abs(contentY - layout.y),
-          Math.abs(contentY - (layout.y + layout.height))
+          Math.abs(contentY - rowY),
+          Math.abs(contentY - rowBottom)
         );
         if (diff < minDiff) {
           minDiff = diff;
           targetSentenceIndex = i;
+          targetRowY = rowY;
         }
+        
+        currentY += height;
       }
 
       if (targetSentenceIndex === -1) return;
@@ -138,10 +153,9 @@ export function ReaderView() {
       const wordLayouts = wordLayoutsRef.current[targetSentenceIndex];
       if (!wordLayouts) return;
 
-      const targetRowLayout = rowLayoutsRef.current[targetSentenceIndex];
       // Padding Horizontal is applied to contentContainerStyle, so item X is indented
       const relativeX = pageX - theme.spacing.lg;
-      const relativeY = contentY - targetRowLayout.y;
+      const relativeY = contentY - targetRowY;
 
       let targetWordIndex = -1;
       let minWordDist = Infinity;
@@ -202,7 +216,7 @@ export function ReaderView() {
         const sentence = chapter.sentences[i];
         offset += rowHeightCacheRef.current[i] ?? estimateRowHeight(sentence);
       }
-      return Math.max(0, offset - FOLLOW_SCROLL_OFFSET);
+      return Math.max(0, offset - containerHeightRef.current * 0.3);
     },
     [chapter.sentences],
   );
@@ -212,13 +226,13 @@ export function ReaderView() {
       listRef.current?.scrollToIndex({
         index,
         animated,
-        viewOffset: FOLLOW_SCROLL_OFFSET,
+        viewPosition: 0.3,
       });
       setTimeout(() => {
         listRef.current?.scrollToIndex({
           index,
           animated,
-          viewOffset: FOLLOW_SCROLL_OFFSET,
+          viewPosition: 0.3,
         });
       }, SCROLL_RETRY_MS);
       setTimeout(() => {
@@ -230,7 +244,7 @@ export function ReaderView() {
           listRef.current?.scrollToIndex({
             index,
             animated,
-            viewOffset: FOLLOW_SCROLL_OFFSET,
+            viewPosition: 0.3,
           });
         }, SCROLL_RETRY_MS);
       }, SCROLL_RETRY_MS * 2);
@@ -239,28 +253,10 @@ export function ReaderView() {
   );
 
   const handleScrollBeginDrag = useCallback(() => {
-    followPausedUntilRef.current = Date.now() + FOLLOW_PAUSE_MS;
+    setIsUserScrolledAway(true);
     // Scrolling away from a selection = implicit dismiss.
     clearSelection();
   }, [clearSelection]);
-
-  const handleViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      visibleIndicesRef.current = new Set(
-        viewableItems
-          .map((item) => item.index)
-          .filter((index): index is number => index !== null && index !== undefined),
-      );
-    },
-    [],
-  );
-
-  const viewabilityConfigCallbackPairs = useRef([
-    {
-      viewabilityConfig: { itemVisiblePercentThreshold: 10 },
-      onViewableItemsChanged: handleViewableItemsChanged,
-    },
-  ]).current;
 
   const handleWordLayout = useCallback(
     (sentenceIndex: number, wordIndex: number, layout: { x: number; y: number; width: number; height: number }) => {
@@ -273,12 +269,9 @@ export function ReaderView() {
   );
 
   const handleRowLayout = useCallback(
-    (index: number, height: number, y?: number) => {
+    (index: number, height: number) => {
       if (height > 0) {
         rowHeightCacheRef.current[index] = height;
-        if (y !== undefined) {
-          rowLayoutsRef.current[index] = { y, height };
-        }
       }
     },
     []
@@ -288,16 +281,30 @@ export function ReaderView() {
 
   useEffect(() => {
     if (activeSentenceIndex < 0 || !isImmersive || !followMode) return;
-    if (Date.now() < followPausedUntilRef.current && !forceScrollRef.current) return;
-    if (!forceScrollRef.current && visibleIndicesRef.current.has(activeSentenceIndex)) {
-      return;
+    if (isUserScrolledAway && !forceScrollRef.current) return;
+    
+    if (!forceScrollRef.current) {
+      let rowY = theme.spacing.xl;
+      for (let i = 0; i < activeSentenceIndex; i++) {
+        rowY += rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i]);
+      }
+      
+      const screenY = rowY - scrollYRef.current;
+      const containerHeight = containerHeightRef.current;
+      
+      // Sweet spot: between 20% and 70% of the screen height
+      if (screenY >= containerHeight * 0.2 && screenY <= containerHeight * 0.7) {
+        return; // It's in the sweet spot, no need to scroll
+      }
     }
+
     scrollToSentence(activeSentenceIndex);
     forceScrollRef.current = false;
-  }, [activeSentenceIndex, isImmersive, followMode, scrollToSentence]);
+  }, [activeSentenceIndex, isImmersive, followMode, isUserScrolledAway, scrollToSentence, chapter.sentences]);
 
   useEffect(() => {
     if (scrollToSentenceIndex === null) return;
+    setIsUserScrolledAway(false);
     forceScrollRef.current = true;
     scrollToSentence(scrollToSentenceIndex);
     clearScrollTarget();
@@ -321,13 +328,13 @@ export function ReaderView() {
         onSpanSeek={(startMs) => {
           // Tapping any word dismisses the active selection, then seeks.
           clearSelection();
+          setIsUserScrolledAway(false);
           void seekToWord(startMs);
         }}
         onWordLongPress={handleWordLongPress}
         selectionRange={selection}
-        onDragSelectionHandle={handleDragSelectionHandle}
         onWordLayout={handleWordLayout}
-        onLayout={(height, y) => handleRowLayout(index, height, y)}
+        onLayout={(height) => handleRowLayout(index, height)}
       />
     ),
     [
@@ -366,11 +373,14 @@ export function ReaderView() {
     [karaokeEnabled, isPlaying, activeSentenceIndex],
   );
 
-  const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      scrollYRef.current = event.nativeEvent.contentOffset.y;
-    },
-    [],
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollYAnim } } }],
+    {
+      useNativeDriver: true,
+      listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        scrollYRef.current = event.nativeEvent.contentOffset.y;
+      },
+    }
   );
 
   // Tapping empty space below the last sentence also clears selection.
@@ -389,6 +399,31 @@ export function ReaderView() {
 
   const showSyncNotice = chapter.syncReady === false && !audioError;
 
+  const getWordPosition = useCallback(
+    (sentenceIndex: number, wordIndex: number) => {
+      const wordLayouts = wordLayoutsRef.current[sentenceIndex];
+      if (!wordLayouts) return null;
+      const wLayout = wordLayouts[wordIndex];
+      if (!wLayout) return null;
+
+      let rowY = theme.spacing.xl;
+      for (let i = 0; i < sentenceIndex; i++) {
+        rowY += rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i]);
+      }
+
+      return {
+        x: theme.spacing.lg + wLayout.x,
+        y: rowY + wLayout.y,
+        width: wLayout.width,
+        height: wLayout.height,
+      };
+    },
+    [chapter.sentences]
+  );
+
+  const startPos = selection ? getWordPosition(selection.startSentenceIndex, selection.startWordIndex) : null;
+  const endPos = selection ? getWordPosition(selection.endSentenceIndex, selection.endWordIndex) : null;
+
   return (
     <View
       ref={containerRef}
@@ -403,7 +438,7 @@ export function ReaderView() {
         </View>
       ) : null}
 
-      <FlashList
+      <AnimatedFlashList
         ref={listRef}
         data={chapter.sentences}
         renderItem={renderItem}
@@ -416,7 +451,6 @@ export function ReaderView() {
         onScrollBeginDrag={handleScrollBeginDrag}
         onScroll={handleScroll}
         scrollEventThrottle={16}
-        viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
         ListFooterComponent={listFooter}
         extraData={{
           activeSentenceIndex,
@@ -427,6 +461,46 @@ export function ReaderView() {
           selectedWordIndex: selection?.wordIndex ?? null,
         }}
       />
+
+      {/* Global Animated Selection Handles */}
+      {selection && startPos && (
+        <Animated.View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            top: startPos.y,
+            left: startPos.x,
+            width: startPos.width,
+            height: startPos.height,
+            transform: [{ translateY: Animated.multiply(scrollYAnim, -1) }],
+            zIndex: 100,
+          }}
+        >
+          <SelectionHandle
+            type="start"
+            onDragMove={(x, y) => handleDragSelectionHandle('start', x, y)}
+          />
+        </Animated.View>
+      )}
+      {selection && endPos && (
+        <Animated.View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            top: endPos.y,
+            left: endPos.x,
+            width: endPos.width,
+            height: endPos.height,
+            transform: [{ translateY: Animated.multiply(scrollYAnim, -1) }],
+            zIndex: 100,
+          }}
+        >
+          <SelectionHandle
+            type="end"
+            onDragMove={(x, y) => handleDragSelectionHandle('end', x, y)}
+          />
+        </Animated.View>
+      )}
 
       {/* Floating toolbar — hovers above the selected word */}
       {selection ? (
@@ -439,6 +513,15 @@ export function ReaderView() {
           onDismiss={clearSelection}
         />
       ) : null}
+
+      <ReturnToSyncBtn
+        visible={isUserScrolledAway && isImmersive && isPlaying}
+        onPress={() => {
+          setIsUserScrolledAway(false);
+          forceScrollRef.current = true;
+          scrollToSentence(activeSentenceIndex);
+        }}
+      />
 
       {/* Definition card — slides up from bottom of reader area */}
       <DefinitionCard

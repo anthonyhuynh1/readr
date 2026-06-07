@@ -23,7 +23,6 @@ import {
   wordsForSpan,
 } from '../../utils/paragraphSentences';
 import { KaraokeWord } from '../KaraokeWord';
-import { SelectionHandle } from './SelectionHandle';
 
 export interface SelectionRange {
   startSentenceIndex: number;
@@ -51,9 +50,7 @@ interface ParagraphRowProps {
   selectionRange: SelectionRange | null;
   /** Callback fired when a WordSpan measures its layout (for drag-to-select math). */
   onWordLayout?: (sentenceIndex: number, wordIndex: number, layout: { x: number; y: number; width: number; height: number }) => void;
-  /** Callback fired when a drag handle is moved. */
-  onDragSelectionHandle?: (type: 'start' | 'end', pageX: number, pageY: number) => void;
-  onLayout?: (height: number, y: number) => void;
+  onLayout?: (height: number) => void;
 }
 
 function useParagraphSpans(sentence: Sentence) {
@@ -71,12 +68,9 @@ interface WordSpanProps {
   isPast: boolean;
   isCurrent: boolean;
   isSelected: boolean;
-  showStartHandle: boolean;
-  showEndHandle: boolean;
   onPress: (anchorY: number) => void;
   onLongPress: (anchorY: number) => void;
   onWordLayout?: (layout: { x: number; y: number; width: number; height: number }) => void;
-  onDragSelectionHandle?: (type: 'start' | 'end', pageX: number, pageY: number) => void;
 }
 
 const WordSpan = memo(function WordSpan({
@@ -85,12 +79,9 @@ const WordSpan = memo(function WordSpan({
   isPast,
   isCurrent,
   isSelected,
-  showStartHandle,
-  showEndHandle,
   onPress,
   onLongPress,
   onWordLayout,
-  onDragSelectionHandle,
 }: WordSpanProps) {
   const ref = useRef<View>(null);
 
@@ -116,9 +107,6 @@ const WordSpan = memo(function WordSpan({
       style={[styles.wordHit, isSelected && styles.wordSelected]}
       onLayout={(e) => onWordLayout?.(e.nativeEvent.layout)}
     >
-      {showStartHandle && (
-        <SelectionHandle type="start" onDragMove={(x, y) => onDragSelectionHandle?.('start', x, y)} />
-      )}
       <Text
         style={[
           styles.readerText,
@@ -128,9 +116,6 @@ const WordSpan = memo(function WordSpan({
       >
         {word.word}{trailingSpace ? ' ' : ''}
       </Text>
-      {showEndHandle && (
-        <SelectionHandle type="end" onDragMove={(x, y) => onDragSelectionHandle?.('end', x, y)} />
-      )}
     </Pressable>
   );
 });
@@ -170,7 +155,6 @@ const StaticParagraphRow = memo(function StaticParagraphRow({
   onWordLongPress,
   selectionRange,
   onWordLayout,
-  onDragSelectionHandle,
   onLayout,
 }: Omit<ParagraphRowProps, 'showWordKaraoke' | 'selectedWordIndex'>) {
   const spans = useParagraphSpans(sentence);
@@ -182,7 +166,7 @@ const StaticParagraphRow = memo(function StaticParagraphRow({
 
   const handleLayout = useCallback(
     (event: LayoutChangeEvent) =>
-      onLayout?.(event.nativeEvent.layout.height, event.nativeEvent.layout.y),
+      onLayout?.(event.nativeEvent.layout.height),
     [onLayout],
   );
 
@@ -216,12 +200,6 @@ const StaticParagraphRow = memo(function StaticParagraphRow({
                 const globalWi = sentence.words.indexOf(word);
                 const trailingSpace = wi < spanWords.length - 1 || si < spans.length - 1;
                 const isSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
-                const showStartHandle =
-                  selectionRange?.startSentenceIndex === sentence.index &&
-                  selectionRange?.startWordIndex === globalWi;
-                const showEndHandle =
-                  selectionRange?.endSentenceIndex === sentence.index &&
-                  selectionRange?.endWordIndex === globalWi;
 
                 return (
                   <WordSpan
@@ -231,9 +209,6 @@ const StaticParagraphRow = memo(function StaticParagraphRow({
                     isPast={isPastSpan}
                     isCurrent={isActiveSentence && isImmersive && si === activeSpanIndex}
                     isSelected={isSelected}
-                    showStartHandle={showStartHandle}
-                    showEndHandle={showEndHandle}
-                    onDragSelectionHandle={onDragSelectionHandle}
                     onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
                     onPress={(anchorY) => {
                       if (isPlaying) {
@@ -272,7 +247,6 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
   onWordLongPress,
   selectionRange,
   onWordLayout,
-  onDragSelectionHandle,
   onLayout,
 }: Omit<ParagraphRowProps, 'showWordKaraoke' | 'isActiveSentence'>) {
   const syncTimeMs = useCoarseSyncTime(50);
@@ -299,7 +273,7 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
 
   const handleLayout = useCallback(
     (event: LayoutChangeEvent) =>
-      onLayout?.(event.nativeEvent.layout.height, event.nativeEvent.layout.y),
+      onLayout?.(event.nativeEvent.layout.height),
     [onLayout],
   );
 
@@ -320,12 +294,6 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
       const isCurrent = wi === activeWordIndexInSpan;
       const globalWi = sentence.words.indexOf(word);
       const isWordSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
-      const showStartHandle =
-        selectionRange?.startSentenceIndex === sentence.index &&
-        selectionRange?.startWordIndex === globalWi;
-      const showEndHandle =
-        selectionRange?.endSentenceIndex === sentence.index &&
-        selectionRange?.endWordIndex === globalWi;
       
       const key = `${spanKey}-w-${word.index}`;
       const handlePress = (anchorY: number) => {
@@ -342,23 +310,15 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
       if (isCurrent && useSolidFallback) {
         return (
           <View key={key} style={isWordSelected && styles.wordSelected} onLayout={(e) => onWordLayout?.(sentence.index, globalWi, e.nativeEvent.layout)}>
-            {showStartHandle && (
-              <SelectionHandle type="start" onDragMove={(x, y) => onDragSelectionHandle?.('start', x, y)} />
-            )}
             <WordSpan
               word={word}
               trailingSpace={trailingSpace}
               isPast={false}
               isCurrent={false}
               isSelected={false}
-              showStartHandle={false}
-              showEndHandle={false}
               onPress={handlePress}
               onLongPress={handleLongPress}
             />
-            {showEndHandle && (
-              <SelectionHandle type="end" onDragMove={(x, y) => onDragSelectionHandle?.('end', x, y)} />
-            )}
           </View>
         );
       }
@@ -366,9 +326,6 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
       if (isCurrent) {
         return (
           <View key={key} style={isWordSelected && styles.wordSelected} onLayout={(e) => onWordLayout?.(sentence.index, globalWi, e.nativeEvent.layout)}>
-            {showStartHandle && (
-              <SelectionHandle type="start" onDragMove={(x, y) => onDragSelectionHandle?.('start', x, y)} />
-            )}
             <KaraokeWord
               word={word}
               isKaraokeActive={isKaraokeActive}
@@ -376,9 +333,6 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
               onPress={handlePress}
               onLongPress={handleLongPress}
             />
-            {showEndHandle && (
-              <SelectionHandle type="end" onDragMove={(x, y) => onDragSelectionHandle?.('end', x, y)} />
-            )}
           </View>
         );
       }
@@ -391,9 +345,6 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
           isPast={isPast}
           isCurrent={false}
           isSelected={isWordSelected}
-          showStartHandle={showStartHandle}
-          showEndHandle={showEndHandle}
-          onDragSelectionHandle={onDragSelectionHandle}
           onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
           onPress={handlePress}
           onLongPress={handleLongPress}
@@ -445,12 +396,6 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
                 const globalWi = sentence.words.indexOf(word);
                 const trailingSpace = wi < spanWords.length - 1 || si < spans.length - 1;
                 const isSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
-                const showStartHandle =
-                  selectionRange?.startSentenceIndex === sentence.index &&
-                  selectionRange?.startWordIndex === globalWi;
-                const showEndHandle =
-                  selectionRange?.endSentenceIndex === sentence.index &&
-                  selectionRange?.endWordIndex === globalWi;
 
                 return (
                   <WordSpan
@@ -460,9 +405,6 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
                     isPast={isPastSpan}
                     isCurrent={false}
                     isSelected={isSelected}
-                    showStartHandle={showStartHandle}
-                    showEndHandle={showEndHandle}
-                    onDragSelectionHandle={onDragSelectionHandle}
                     onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
                     onPress={(anchorY) => {
                       if (isPlaying) {
