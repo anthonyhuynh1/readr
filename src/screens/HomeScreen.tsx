@@ -8,12 +8,12 @@ import {
 import { ScreenShell } from '../components/ScreenShell';
 import { BookCard } from '../components/BookCard';
 import { theme } from '../constants/theme';
-import { usePlayback } from '../context/PlaybackContext';
+import { useCatalog } from '../context/CatalogContext';
 import { useOpenBook } from '../hooks/useOpenBook';
 import { canReadBook } from '../services/content/repository';
 
 export function HomeScreen() {
-  const { books, isLoadingContent } = usePlayback();
+  const { books, isLoadingContent } = useCatalog();
   const openBook = useOpenBook();
 
   const featured = books.slice(0, 3);

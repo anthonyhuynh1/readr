@@ -1,3 +1,11 @@
+/**
+ * PlaybackContext — Orchestrates the reading session: chapter loading, audio
+ * playback, sync clock, and cross-domain actions (e.g. jumpToBookmark).
+ *
+ * AI state → AiContext
+ * Catalog state → CatalogContext
+ * Bookmark CRUD → BookmarkContext
+ */
 import React, {
   createContext,
   useCallback,
@@ -8,53 +16,41 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { buildWordIndex, mockBook, mockChapter } from '../data/mockChapter';
+import { EMPTY_BOOK, EMPTY_CHAPTER } from '../data/emptyChapter';
+import { buildWordIndex } from '../utils/syncAsset';
 import { chapterAudioPlayer } from '../services/audio/chapterPlayer';
-import { askAi } from '../services/ai/askAi';
-import {
-  deleteBookmark,
-  loadBookmarks,
-  syncBookmarkQueue,
-  upsertBookmark,
-} from '../services/bookmarks/repository';
 import { resolveChapterAudioSource } from '../services/content/audioSources';
 import {
   fetchChapter,
   prefetchChapter,
-  reloadCatalog,
 } from '../services/content/repository';
 import { usePlaybackProgress } from '../store/ProgressProvider';
-import { getContentSources, useContentStore } from '../store/useContentStore';
+import { getContentSources } from '../store/useContentStore';
 import {
   usePlaybackStore,
   type PlaybackSpeed,
 } from '../store/usePlaybackStore';
 import { useAuth } from './AuthContext';
+import { useCatalog } from './CatalogContext';
+import { useBookmarks } from './BookmarkContext';
 import {
   buildSentenceTimeBounds,
   findActiveSentenceIndex,
   type SentenceTimeBounds,
 } from '../utils/sentenceSync';
 import type {
-  AskAiResponse,
   Book,
-  BookCatalogItem,
   Bookmark,
   Chapter,
   IndexedWord,
-  Sentence,
 } from '../types';
 
 const FALLBACK_TICK_MS = 16;
 const SKIP_MS = 15_000;
 
-/** Session + actions for playback, catalog, and reader chrome. */
+/** Session state and actions for the active reading/playback session. */
 export interface PlaybackSessionValue {
-  books: Book[];
-  catalog: BookCatalogItem[];
   userId: string | null;
-  isLoadingContent: boolean;
-  refreshCatalog: () => Promise<void>;
   refreshCurrentChapter: () => Promise<void>;
   openBook: (bookSlug: string, chapterSlug?: string) => Promise<void>;
   selectChapter: (chapterSlug: string) => Promise<void>;
@@ -72,12 +68,9 @@ export interface PlaybackSessionValue {
   isPlaying: boolean;
   isImmersive: boolean;
 
+  /** Bookmarks are owned by BookmarkContext; exposed here for cross-domain use. */
   bookmarks: Bookmark[];
   scrollToSentenceIndex: number | null;
-  aiSheetVisible: boolean;
-  aiContextSentence: Sentence | null;
-  aiResponse: AskAiResponse | null;
-  isAskingAi: boolean;
 
   play: () => Promise<void>;
   pause: () => Promise<void>;
@@ -89,15 +82,8 @@ export interface PlaybackSessionValue {
   goToPrevChapter: () => Promise<void>;
   goToNextChapter: () => Promise<void>;
   setPlaybackRate: (rate: PlaybackSpeed) => Promise<void>;
-  addBookmark: (
-    bookmark: Omit<Bookmark, 'id' | 'created_at' | 'pending_sync'>,
-  ) => Promise<void>;
   jumpToBookmark: (bookmarkId: string) => Promise<void>;
-  removeBookmark: (bookmarkId: string) => Promise<void>;
   clearScrollTarget: () => void;
-  openAskAi: (sentence: Sentence) => void;
-  closeAskAi: () => void;
-  submitAskAi: (userPrompt: string) => Promise<void>;
 }
 
 const PlaybackSessionContext = createContext<PlaybackSessionValue | null>(null);
@@ -105,6 +91,8 @@ const PlaybackSessionContext = createContext<PlaybackSessionValue | null>(null);
 export function PlaybackProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { progressMs } = usePlaybackProgress();
+  const { booksRef } = useCatalog();
+  const { bookmarks, clearBookmarks } = useBookmarks();
 
   const isPlaying = usePlaybackStore((s) => s.isPlaying);
   const isImmersive = usePlaybackStore((s) => s.isImmersive);
@@ -119,17 +107,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const setImmersive = usePlaybackStore((s) => s.setImmersive);
   const storeSetPlaybackRate = usePlaybackStore((s) => s.setPlaybackRate);
 
-  const [books, setBooks] = useState<Book[]>([]);
-  const [catalog, setCatalog] = useState<BookCatalogItem[]>([]);
-  const [isLoadingContent, setIsLoadingContent] = useState(true);
-  const [book, setBook] = useState<Book>(mockBook);
-  const [chapter, setChapter] = useState<Chapter>(mockChapter);
+  const [book, setBook] = useState<Book>(EMPTY_BOOK);
+  const [chapter, setChapter] = useState<Chapter>(EMPTY_CHAPTER);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioDurationMs, setAudioDurationMs] = useState(0);
   const [useFallbackClock, setUseFallbackClock] = useState(false);
-
-  const booksRef = useRef(books);
-  booksRef.current = books;
 
   const playbackRateRef = useRef(usePlaybackStore.getState().playbackRate);
   useEffect(() => {
@@ -139,12 +121,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const wordIndex = useMemo(() => buildWordIndex(chapter), [chapter]);
-
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [aiSheetVisible, setAiSheetVisible] = useState(false);
-  const [aiContextSentence, setAiContextSentence] = useState<Sentence | null>(null);
-  const [aiResponse, setAiResponse] = useState<AskAiResponse | null>(null);
-  const [isAskingAi, setIsAskingAi] = useState(false);
 
   const fallbackRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chapterSlugRef = useRef(chapter.slug);
@@ -164,7 +140,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const syncActiveSentenceIndex = useCallback((visualMs: number) => {
     const { starts, ends } = sentenceBoundsRef.current;
     if (starts.length === 0) return;
-
     const idx = findActiveSentenceIndex(starts, ends, visualMs);
     if (idx !== lastActiveSentenceRef.current) {
       lastActiveSentenceRef.current = idx;
@@ -202,7 +177,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const source = await resolveChapterAudioSource(
         nextChapter.slug,
         nextChapter.audioPath,
-        nextChapter.chapterIndex,
       );
       if (!source) {
         setUseFallbackClock(true);
@@ -217,6 +191,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           headers: source.headers,
           audioOffsetMs: nextChapter.audioOffsetMs,
           onVisualPosition: (visualMs) => {
+            // Guard against stale callbacks from a previously loaded chapter.
             if (chapterSlugRef.current !== nextChapter.slug) return;
             applyVisualPosition(visualMs);
           },
@@ -234,6 +209,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         });
         await chapterAudioPlayer.setRate(playbackRateRef.current);
         setUseFallbackClock(false);
+        // If the user pressed play while audio was still loading, start playback now.
+        // Without this, play() sees isLoaded()=false, sets isPlaying=true but never
+        // starts the player, leaving the progress bar and karaoke stalled.
+        if (usePlaybackStore.getState().isPlaying) {
+          await chapterAudioPlayer.play();
+        }
       } catch (error) {
         setUseFallbackClock(true);
         setAudioError(
@@ -267,6 +248,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         setUseFallbackClock(true);
       }
 
+      // Prefetch adjacent chapters so switching feels instant.
       const chapterList = nextBook.chapters;
       const idx = chapterList.findIndex((c) => c.slug === nextChapter.slug);
       if (idx > 0) prefetchChapter(nextBook.slug, chapterList[idx - 1].slug);
@@ -284,9 +266,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       try {
         const catalogBooks = booksRef.current;
         const bookEntry = catalogBooks.find((entry) => entry.slug === bookSlug);
-        const resolvedChapterSlug =
-          chapterSlug ??
-          bookEntry?.chapters[0]?.slug;
+        const resolvedChapterSlug = chapterSlug ?? bookEntry?.chapters[0]?.slug;
         if (!resolvedChapterSlug) {
           throw new Error(`No chapters available for ${bookSlug}`);
         }
@@ -297,7 +277,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         setOpeningBook(false);
       }
     },
-    [applyChapter, setLoadedBookSlug, setOpeningBook],
+    [applyChapter, booksRef, setLoadedBookSlug, setOpeningBook],
   );
 
   const selectChapter = useCallback(
@@ -337,20 +317,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const stopSessionForSignOut = useCallback(async () => {
     setPlaying(false);
     clearFallbackTimer();
-    setAiSheetVisible(false);
-    setAiContextSentence(null);
-    setAiResponse(null);
-    setIsAskingAi(false);
     setAudioError(null);
     setAudioDurationMs(0);
     setUseFallbackClock(false);
-    setBookmarks([]);
+    // Reset bookmark list via BookmarkContext.
+    clearBookmarks();
     progressMs.value = 0;
-    setBook(mockBook);
-    setChapter(mockChapter);
+    setBook(EMPTY_BOOK);
+    setChapter(EMPTY_CHAPTER);
     usePlaybackStore.getState().resetForSignOut();
     await chapterAudioPlayer.unload();
-  }, [clearFallbackTimer, progressMs, setPlaying]);
+  }, [clearBookmarks, clearFallbackTimer, progressMs, setPlaying]);
 
   const play = useCallback(async () => {
     if (chapterAudioPlayer.isLoaded() && !useFallbackClock) {
@@ -358,7 +335,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setPlaying(true);
       return;
     }
-
     setPlaying(true);
   }, [setPlaying, useFallbackClock]);
 
@@ -379,7 +355,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     async (timeMs: number) => {
       const clamped = Math.max(0, Math.min(timeMs, timelineDurationMs));
       applyVisualPosition(clamped);
-
       if (chapterAudioPlayer.isLoaded() && !useFallbackClock) {
         await chapterAudioPlayer.seekVisualMs(clamped);
       }
@@ -415,24 +390,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const seekToWord = useCallback(
     async (startMs: number) => {
       setImmersive(true);
-      await seekTo(startMs);
+      // Subtract 300ms to compensate for MP3 keyframe snap — the decoder rounds
+      // to the nearest frame boundary, so seeking slightly early lands on the
+      // target word rather than the next span boundary.
+      await seekTo(Math.max(0, startMs - 300));
       if (!usePlaybackStore.getState().isPlaying && chapterAudioPlayer.isLoaded()) {
         await play();
       }
     },
     [play, seekTo, setImmersive],
   );
-
-  const refreshCatalog = useCallback(async () => {
-    setIsLoadingContent(true);
-    try {
-      const { catalog, books: nextBooks } = await reloadCatalog();
-      setCatalog(catalog);
-      setBooks(nextBooks);
-    } finally {
-      setIsLoadingContent(false);
-    }
-  }, []);
 
   const refreshCurrentChapter = useCallback(async () => {
     if (!book.slug || !chapter.slug) return;
@@ -445,52 +412,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
   }, [applyChapter, book.slug, chapter.slug, setSwitchingChapter]);
 
-  const catalogSource = useContentStore((s) => s.catalogSource);
-  const textSource = useContentStore((s) => s.textSource);
-  const contentHydrated = useContentStore((s) => s.hydrated);
-
-  useEffect(() => {
-    void useContentStore.getState().hydrate();
-  }, []);
-
-  useEffect(() => {
-    if (!contentHydrated) return;
-    void refreshCatalog();
-  }, [contentHydrated, catalogSource, textSource, refreshCatalog]);
-
-  useEffect(() => {
-    if (!user) {
-      setBookmarks([]);
-      return;
-    }
-
-    (async () => {
-      const loaded = await loadBookmarks(user.id);
-      setBookmarks(loaded);
-      await syncBookmarkQueue(user.id);
-      const refreshed = await loadBookmarks(user.id);
-      setBookmarks(refreshed);
-    })();
-  }, [user]);
-
-  const addBookmark = useCallback(
-    async (partial: Omit<Bookmark, 'id' | 'created_at' | 'pending_sync'>) => {
-      const bookmark = await upsertBookmark(partial);
-      setBookmarks((prev) => [bookmark, ...prev]);
-      if (user) {
-        await syncBookmarkQueue(user.id);
-        const loaded = await loadBookmarks(user.id);
-        setBookmarks(loaded);
-      }
-    },
-    [user],
-  );
-
+  /**
+   * jumpToBookmark crosses domains: Bookmarks (data) → Chapter (load) → Audio (seek) → Sync (scroll).
+   * It lives here as the orchestration layer that connects them.
+   */
   const jumpToBookmark = useCallback(
     async (bookmarkId: string) => {
       const target = bookmarks.find((b) => b.id === bookmarkId);
       if (!target) return;
-
       if (target.chapter_slug !== chapter.slug) {
         const payload = await fetchChapter(target.book_slug, target.chapter_slug);
         await applyChapter(payload.book, payload.chapter, false);
@@ -501,67 +430,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     [applyChapter, bookmarks, chapter.slug, seekTo, setScrollTarget],
   );
 
-  const removeBookmark = useCallback(
-    async (bookmarkId: string) => {
-      if (!user) return;
-      await deleteBookmark(bookmarkId, user.id);
-      setBookmarks((prev) => prev.filter((entry) => entry.id !== bookmarkId));
-      await syncBookmarkQueue(user.id);
-      const loaded = await loadBookmarks(user.id);
-      setBookmarks(loaded);
-    },
-    [user],
-  );
-
   const clearScrollTarget = useCallback(() => {
     clearScrollTargetStore();
   }, [clearScrollTargetStore]);
 
-  const openAskAi = useCallback((sentence: Sentence) => {
-    setAiContextSentence(sentence);
-    setAiResponse(null);
-    setAiSheetVisible(true);
-  }, []);
-
-  const closeAskAi = useCallback(() => {
-    setAiSheetVisible(false);
-    setAiContextSentence(null);
-    setAiResponse(null);
-  }, []);
-
-  const submitAskAi = useCallback(
-    async (userPrompt: string) => {
-      if (!aiContextSentence) return;
-      setIsAskingAi(true);
-      const neighborhood = chapter.sentences
-        .filter(
-          (entry) =>
-            Math.abs(entry.index - aiContextSentence.index) <= 1 &&
-            entry.id !== aiContextSentence.id,
-        )
-        .map((entry) => entry.text);
-
-      const response = await askAi({
-        book_slug: book.slug,
-        chapter_slug: chapter.slug,
-        sentence_id: aiContextSentence.id,
-        sentence_text: aiContextSentence.text,
-        surrounding_sentences: neighborhood,
-        user_prompt: userPrompt,
-      });
-      setAiResponse(response);
-      setIsAskingAi(false);
-    },
-    [aiContextSentence, book.slug, chapter],
-  );
-
+  // Fallback JS clock: advances progressMs when audio is unavailable.
   useEffect(() => {
-    if (!isPlaying || !useFallbackClock) {
-      return;
-    }
-
+    if (!isPlaying || !useFallbackClock) return;
     fallbackRef.current = setInterval(() => {
-      const next = Math.min(progressMs.value + FALLBACK_TICK_MS, timelineDurationMs);
+      const advance = FALLBACK_TICK_MS * playbackRateRef.current;
+      const next = Math.min(progressMs.value + advance, timelineDurationMs);
       progressMs.value = next;
       syncActiveSentenceIndex(next);
       if (next >= timelineDurationMs) {
@@ -577,6 +455,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     };
   }, [isPlaying, useFallbackClock, timelineDurationMs, progressMs, setPlaying, syncActiveSentenceIndex]);
 
+  // Clean up audio and timers when provider unmounts.
   useEffect(() => {
     return () => {
       clearFallbackTimer();
@@ -586,11 +465,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const sessionValue = useMemo<PlaybackSessionValue>(
     () => ({
-      books,
-      catalog,
       userId: user?.id ?? null,
-      isLoadingContent,
-      refreshCatalog,
       refreshCurrentChapter,
       openBook,
       selectChapter,
@@ -607,10 +482,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isImmersive,
       bookmarks,
       scrollToSentenceIndex,
-      aiSheetVisible,
-      aiContextSentence,
-      aiResponse,
-      isAskingAi,
       play,
       pause,
       togglePlay,
@@ -621,20 +492,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       goToPrevChapter,
       goToNextChapter,
       setPlaybackRate,
-      addBookmark,
       jumpToBookmark,
-      removeBookmark,
       clearScrollTarget,
-      openAskAi,
-      closeAskAi,
-      submitAskAi,
     }),
     [
-      books,
-      catalog,
       user?.id,
-      isLoadingContent,
-      refreshCatalog,
       refreshCurrentChapter,
       openBook,
       selectChapter,
@@ -651,10 +513,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isImmersive,
       bookmarks,
       scrollToSentenceIndex,
-      aiSheetVisible,
-      aiContextSentence,
-      aiResponse,
-      isAskingAi,
       play,
       pause,
       togglePlay,
@@ -665,13 +523,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       goToPrevChapter,
       goToNextChapter,
       setPlaybackRate,
-      addBookmark,
       jumpToBookmark,
-      removeBookmark,
       clearScrollTarget,
-      openAskAi,
-      closeAskAi,
-      submitAskAi,
     ],
   );
 
@@ -682,6 +535,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** Access the active playback session. Must be used within a PlaybackProvider. */
 export function usePlaybackSession(): PlaybackSessionValue {
   const ctx = useContext(PlaybackSessionContext);
   if (!ctx) {
@@ -690,7 +544,7 @@ export function usePlaybackSession(): PlaybackSessionValue {
   return ctx;
 }
 
-/** Alias for session context — active sentence sync no longer uses React clock state. */
+/** Alias for usePlaybackSession — preferred hook name for screens and components. */
 export function usePlayback(): PlaybackSessionValue {
   return usePlaybackSession();
 }

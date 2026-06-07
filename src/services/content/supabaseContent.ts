@@ -1,12 +1,11 @@
 import { getBookCoverUrl } from '../../data/bookCovers';
-import { resolveAudioOffsetMs } from '../../data/chapterMediaOverrides';
+import { getBundledSyncAssetBySlug } from '../../data/bundledSyncAssets';
 import { env, hasSupabaseConfig } from '../../config/env';
 import { getSupabaseClient } from '../supabase/client';
 import { loadChapterSyncAsset } from '../sync/cache';
 import { loadChapterTextAsset } from '../sync/textCache';
 import { syncAssetToChapter } from '../../utils/syncAsset';
 import { textAssetToChapter } from '../../utils/textAsset';
-import { getContentSources } from '../../store/useContentStore';
 import type { Book, BookCatalogItem, Chapter } from '../../types';
 import type { ChapterSyncAsset } from '../../types/syncAsset';
 
@@ -75,7 +74,7 @@ function mapDbChapter(row: DbChapter): Omit<Chapter, 'sentences'> {
     durationMs: row.duration_ms,
     audioPath: row.audio_path,
     syncMetadataPath: row.sync_metadata_path,
-    audioOffsetMs: resolveAudioOffsetMs(row.slug, row.audio_offset_ms),
+    audioOffsetMs: row.audio_offset_ms,
     syncHash: row.sync_hash,
     syncVersion: row.sync_version,
     textMetadataPath: row.text_metadata_path || undefined,
@@ -94,14 +93,15 @@ async function applySyncTimings(
   const { asset } = await loadChapterSyncAsset(dbChapter.slug, {
     syncHash: dbChapter.sync_hash,
     syncVersion: dbChapter.sync_version,
-    bundledAsset: emptySyncAsset(dbChapter),
+    bundledAsset:
+      getBundledSyncAssetBySlug(dbChapter.slug) ?? emptySyncAsset(dbChapter),
     remoteUrl: syncUrl,
   });
 
   if (asset.sentences.length === 0) return chapter;
 
   return syncAssetToChapter(
-    { ...asset, audio_offset_ms: resolveAudioOffsetMs(dbChapter.slug, asset.audio_offset_ms) },
+    { ...asset, audio_offset_ms: asset.audio_offset_ms },
     {
     bookSlug,
     title: dbChapter.title,
@@ -144,8 +144,10 @@ async function hydrateChapterFromSupabase(
     durationMs: dbChapter.duration_ms || undefined,
   });
 
-  const { audioEnabled } = getContentSources();
-  if (audioEnabled && dbChapter.sync_hash) {
+  // Load real WhisperX karaoke timings whenever the chapter has them, regardless
+  // of audioEnabled — audioEnabled only controls whether audio playback is wired,
+  // not whether word-level sync data is present.
+  if (dbChapter.sync_hash) {
     chapter = await applySyncTimings(chapter, dbChapter, bookSlug);
   }
 

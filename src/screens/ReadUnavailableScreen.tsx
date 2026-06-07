@@ -13,7 +13,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { ScreenShell } from '../components/ScreenShell';
 import { BookCard } from '../components/BookCard';
 import { theme } from '../constants/theme';
-import { usePlayback } from '../context/PlaybackContext';
+import { useCatalog } from '../context/CatalogContext';
 import { useOpenBook } from '../hooks/useOpenBook';
 import { canReadBook } from '../services/content/repository';
 import type { RootStackParamList } from '../navigation/types';
@@ -33,7 +33,7 @@ export function ReadUnavailableScreen() {
   const route = useRoute<ReadUnavailableRoute>();
   const { title, author, standardEbooksUrl, openLibraryUrl } = route.params;
 
-  const { books } = usePlayback();
+  const { books } = useCatalog();
   const openBook = useOpenBook();
 
   const readableNow = useMemo(

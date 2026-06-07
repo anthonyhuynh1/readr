@@ -20,16 +20,14 @@ export function RootNavigator() {
         name="Read"
         component={ReadScreen}
         options={{
-          animation: 'slide_from_bottom',
-          presentation: 'fullScreenModal',
+          animation: 'slide_from_right',
         }}
       />
       <Stack.Screen
         name="ReadUnavailable"
         component={ReadUnavailableScreen}
         options={{
-          animation: 'slide_from_bottom',
-          presentation: 'fullScreenModal',
+          animation: 'slide_from_right',
         }}
       />
     </Stack.Navigator>

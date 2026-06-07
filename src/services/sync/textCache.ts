@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import type { ChapterTextAsset, TextCacheManifest } from '../../types/chapterTextAsset';
 import { hashTextAsset } from '../../utils/textAsset';
+import { getBundledTextAssetBySlug } from '../../data/bundledSyncAssets';
 
 export { hashTextAsset };
 
@@ -61,19 +62,38 @@ export async function loadChapterTextAsset(
     }
   }
 
-  const dir = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}text/`;
-  await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-  const download = await FileSystem.downloadAsync(remote.remoteUrl, targetPath);
-  const raw = await FileSystem.readAsStringAsync(download.uri);
-  const asset = JSON.parse(raw) as ChapterTextAsset;
+  try {
+    const dir = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}text/`;
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    const download = await FileSystem.downloadAsync(remote.remoteUrl, targetPath);
+    const raw = await FileSystem.readAsStringAsync(download.uri);
+    const asset = JSON.parse(raw) as ChapterTextAsset;
 
-  await writeManifest({
-    chapterSlug,
-    textHash: remote.textHash,
-    textVersion: remote.textVersion,
-    localPath: targetPath,
-    updatedAt: new Date().toISOString(),
-  });
+    await writeManifest({
+      chapterSlug,
+      textHash: remote.textHash,
+      textVersion: remote.textVersion,
+      localPath: targetPath,
+      updatedAt: new Date().toISOString(),
+    });
 
-  return { asset, fromCache: false };
+    return { asset, fromCache: false };
+  } catch (error) {
+    // Offline / fetch failure: serve any previously cached file, then a bundled
+    // fallback (Gatsby ch.1) so the reader still works without network.
+    if (manifest) {
+      const info = await FileSystem.getInfoAsync(manifest.localPath);
+      if (info.exists) {
+        const raw = await FileSystem.readAsStringAsync(manifest.localPath);
+        return { asset: JSON.parse(raw) as ChapterTextAsset, fromCache: true };
+      }
+    }
+
+    const bundled = getBundledTextAssetBySlug(chapterSlug);
+    if (bundled) {
+      return { asset: bundled, fromCache: true };
+    }
+
+    throw error;
+  }
 }

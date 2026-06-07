@@ -1,11 +1,8 @@
 import type { Chapter } from '../types';
 import { hasSupabaseConfig } from '../config/env';
 
-/** Gatsby ch.1 demo — Storage after seed, bundled MP3 offline / pre-seed. */
+/** Audio is playable when Supabase is configured and the chapter has an audio path. */
 export function chapterHasPlayableAudio(chapter: Chapter): boolean {
-  if (chapter.chapterIndex === 1) {
-    return true;
-  }
   return Boolean(hasSupabaseConfig() && chapter.audioPath);
 }
 

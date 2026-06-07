@@ -4,16 +4,9 @@ import { ScreenShell } from '../components/ScreenShell';
 import { theme } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
 import { usePlayback } from '../context/PlaybackContext';
+import { useBookmarks } from '../context/BookmarkContext';
 import { hasSupabaseConfig } from '../config/env';
-import {
-  getMockBookMetadata,
-  getMockChapterCount,
-} from '../services/content/mockContentService';
-import {
-  useContentStore,
-  type CatalogSource,
-  type TextSource,
-} from '../store/useContentStore';
+import { useContentStore } from '../store/useContentStore';
 
 function SourceToggle<T extends string>({
   label,
@@ -51,27 +44,11 @@ function SourceToggle<T extends string>({
 
 export function ProfileScreen() {
   const { user, isDevGuest, signOutUser } = useAuth();
-  const { refreshCatalog, refreshCurrentChapter, bookmarks, stopSessionForSignOut } =
-    usePlayback();
+  const { refreshCurrentChapter, stopSessionForSignOut } = usePlayback();
+  const { bookmarks } = useBookmarks();
   const [signingOut, setSigningOut] = useState(false);
-  const textSource = useContentStore((s) => s.textSource);
-  const catalogSource = useContentStore((s) => s.catalogSource);
   const audioEnabled = useContentStore((s) => s.audioEnabled);
-  const setTextSource = useContentStore((s) => s.setTextSource);
-  const setCatalogSource = useContentStore((s) => s.setCatalogSource);
   const setAudioEnabled = useContentStore((s) => s.setAudioEnabled);
-
-  const mockMeta = getMockBookMetadata();
-
-  const handleCatalogChange = (next: CatalogSource) => {
-    setCatalogSource(next);
-    void refreshCatalog();
-  };
-
-  const handleTextChange = (next: TextSource) => {
-    setTextSource(next);
-    void refreshCatalog();
-  };
 
   const handleAudioChange = (next: 'on' | 'off') => {
     setAudioEnabled(next === 'on');
@@ -113,34 +90,7 @@ export function ProfileScreen() {
 
         {__DEV__ ? (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Content sources</Text>
-            <Text style={styles.hint}>
-              Mock book: {mockMeta.slug} ({getMockChapterCount()} chapters)
-            </Text>
-
-            <SourceToggle
-              label="Catalog"
-              value={catalogSource}
-              onChange={handleCatalogChange}
-              options={[
-                { id: 'openlibrary', title: 'Open Library' },
-                { id: 'local-seed', title: 'Local seed' },
-              ]}
-            />
-
-            <SourceToggle
-              label="Reading text"
-              value={textSource}
-              onChange={handleTextChange}
-              options={[
-                ...(hasSupabaseConfig()
-                  ? [{ id: 'supabase' as const, title: 'Supabase' }]
-                  : []),
-                { id: 'mock-json', title: 'Mock JSON' },
-                { id: 'legacy-seed', title: 'Legacy seed' },
-              ]}
-            />
-
+            <Text style={styles.sectionTitle}>Playback</Text>
             <SourceToggle
               label="Audio"
               value={audioEnabled ? 'on' : 'off'}
@@ -151,8 +101,8 @@ export function ProfileScreen() {
               ]}
             />
             <Text style={styles.hint}>
-              Audio + karaoke: ch.1 only. Placeholder is music until you run npm run fetch:gatsby-audio
-              and seed:supabase — then you get LibriVox narration.
+              Content streams from Supabase. Turn audio off to read silently; karaoke
+              timings still load when available.
             </Text>
           </View>
         ) : null}

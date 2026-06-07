@@ -2,11 +2,14 @@ import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ScreenShell } from '../components/ScreenShell';
 import { theme } from '../constants/theme';
-import { usePlayback } from '../context/PlaybackContext';
+import { useCatalog } from '../context/CatalogContext';
+import { useBookmarks } from '../context/BookmarkContext';
 import { useOpenBook } from '../hooks/useOpenBook';
 import { groupBookmarks } from '../utils/bookmarks';
 
-export function LibraryScreen() {  const { books, bookmarks } = usePlayback();
+export function LibraryScreen() {
+  const { books } = useCatalog();
+  const { bookmarks } = useBookmarks();
   const openBook = useOpenBook();
 
   const bookmarkGroups = useMemo(() => {

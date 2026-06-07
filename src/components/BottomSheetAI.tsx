@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { theme } from '../constants/theme';
+import { useAi } from '../context/AiContext';
 import { usePlayback } from '../context/PlaybackContext';
 
 /**
@@ -22,8 +23,9 @@ export function BottomSheetAI() {
     isAskingAi,
     submitAskAi,
     closeAskAi,
-    isImmersive,
-  } = usePlayback();
+  } = useAi();
+  // isImmersive comes from PlaybackContext — hides the sheet during active playback.
+  const { isImmersive, book, chapter } = usePlayback();
   const [prompt, setPrompt] = React.useState('');
 
   if (isImmersive && !aiSheetVisible) {
@@ -60,7 +62,14 @@ export function BottomSheetAI() {
 
           <Pressable
             style={styles.askButton}
-            onPress={() => void submitAskAi(prompt.trim())}
+            onPress={() =>
+              void submitAskAi({
+                userPrompt: prompt.trim(),
+                bookSlug: book.slug,
+                chapterSlug: chapter.slug,
+                sentences: chapter.sentences,
+              })
+            }
             disabled={isAskingAi || !prompt.trim()}
           >
             <Text style={styles.askButtonText}>

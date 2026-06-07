@@ -5,7 +5,6 @@ import {
 } from '../../config/openLibraryCatalog';
 import type { Book, BookCatalogItem } from '../../types';
 import { slugifyTitle } from '../../utils/slugify';
-import { getMockBookMetadata, getMockChapterStubs } from '../content/mockContentService';
 
 const CACHE_PREFIX = 'readr.ol.work.';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -139,25 +138,17 @@ export async function fetchCatalogFromOpenLibrary(): Promise<BookCatalogItem[]> 
 
 export async function fetchBooksFromOpenLibrary(): Promise<Book[]> {
   const works = await fetchWorksByIds();
-  const mockMeta = getMockBookMetadata();
 
-  return works.map((work) => {
-    const mockChapters =
-      mockMeta?.slug === work.slug ? getMockChapterStubs() : [];
-
-    return {
-      slug: work.slug,
-      title: work.title,
-      author: work.author,
-      description: work.description,
-      coverImageUrl: work.coverImageUrl,
-      standardEbooksUrl: '',
-      librivoxUrl: '',
-      openLibraryWorkId: work.workId,
-      chapters:
-        mockChapters.length > 0
-          ? mockChapters
-          : [],
-    };
-  });
+  // Discovery metadata only — chapter lists for readable books come from Supabase.
+  return works.map((work) => ({
+    slug: work.slug,
+    title: work.title,
+    author: work.author,
+    description: work.description,
+    coverImageUrl: work.coverImageUrl,
+    standardEbooksUrl: '',
+    librivoxUrl: '',
+    openLibraryWorkId: work.workId,
+    chapters: [],
+  }));
 }

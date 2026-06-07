@@ -145,15 +145,52 @@ async function main(): Promise<void> {
 
   const { data: ch1 } = await db
     .from('chapters')
-    .select('slug, audio_path, sync_hash')
+    .select('slug, audio_path, sync_metadata_path, text_metadata_path, sync_hash, text_hash')
     .eq('book_slug', 'the-great-gatsby')
     .eq('chapter_index', 1)
     .maybeSingle();
 
   if (ch1?.audio_path && ch1.sync_hash) {
-    console.log('✓ Gatsby ch.1 has audio + sync metadata (enable Audio in Profile dev toggles)');
+    console.log('✓ Gatsby ch.1 has audio + sync metadata');
   } else {
     console.log('○ Gatsby ch.1 audio not seeded — re-run npm run seed:supabase for karaoke demo');
+  }
+
+  // P0.3 gate: confirm the actual Storage objects exist (text + sync + audio),
+  // since the app reads reading text / karaoke / audio from Storage, not the DB.
+  if (ch1) {
+    const storageChecks: Array<{ label: string; bucket: string; path?: string }> = [
+      { label: 'reading text', bucket: 'text', path: ch1.text_metadata_path ?? undefined },
+      { label: 'sync (karaoke)', bucket: 'sync', path: ch1.sync_metadata_path ?? undefined },
+      { label: 'audio', bucket: 'audio', path: ch1.audio_path ?? undefined },
+    ];
+
+    const base = url.replace(/\/$/, '');
+    let storageOk = true;
+    for (const check of storageChecks) {
+      if (!check.path) {
+        console.log(`○ Gatsby ch.1 ${check.label}: no path in DB row`);
+        storageOk = false;
+        continue;
+      }
+      const publicUrl = `${base}/storage/v1/object/public/${check.bucket}/${check.path}`;
+      try {
+        const res = await fetch(publicUrl, { method: 'HEAD' });
+        if (res.ok) {
+          console.log(`✓ Gatsby ch.1 ${check.label} object reachable in Storage`);
+        } else {
+          console.log(`✗ Gatsby ch.1 ${check.label} Storage object HTTP ${res.status} (${check.bucket}/${check.path})`);
+          storageOk = false;
+        }
+      } catch (err) {
+        console.log(`✗ Gatsby ch.1 ${check.label} Storage check failed: ${(err as Error).message}`);
+        storageOk = false;
+      }
+    }
+
+    if (!storageOk) {
+      console.log('\n○ Some Storage objects are missing — run npm run seed:supabase to upload text/sync/audio.');
+    }
   }
 
   console.log('\n✓ Setup looks good. Restart the app to read from Supabase.');

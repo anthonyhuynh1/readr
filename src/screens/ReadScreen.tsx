@@ -149,8 +149,8 @@ export function ReadScreen() {
 
   useReadSession(bookSlug, initialChapterSlug);
 
-  const goToLibrary = () => {
-    navigation.navigate('MainTabs', { screen: 'Library' });
+  const goBack = () => {
+    navigation.goBack();
   };
 
   const showBlockingLoader = isOpeningBook || loadedBookSlug !== bookSlug;
@@ -161,12 +161,12 @@ export function ReadScreen() {
 
   if (mode === 'listen') {
     return (
-      <AudiobookListenView onModeChange={setMode} onBackToLibrary={goToLibrary} />
+      <AudiobookListenView onModeChange={setMode} onBackToLibrary={goBack} />
     );
   }
 
   return (
-    <ReadTextView onModeChange={setMode} onBackToLibrary={goToLibrary} />
+    <ReadTextView onModeChange={setMode} onBackToLibrary={goBack} />
   );
 }
 

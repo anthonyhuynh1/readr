@@ -3,12 +3,12 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { ScreenShell } from '../components/ScreenShell';
 import { BookCard } from '../components/BookCard';
 import { theme } from '../constants/theme';
-import { usePlayback } from '../context/PlaybackContext';
+import { useCatalog } from '../context/CatalogContext';
 import { useOpenBook } from '../hooks/useOpenBook';
 import { canReadBook } from '../services/content/repository';
 
 export function ExploreScreen() {
-  const { books, isLoadingContent } = usePlayback();
+  const { books, isLoadingContent } = useCatalog();
   const openBook = useOpenBook();
 
   return (

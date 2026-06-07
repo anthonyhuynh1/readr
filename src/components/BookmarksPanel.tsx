@@ -9,44 +9,9 @@ import {
 } from 'react-native';
 import { theme } from '../constants/theme';
 import { usePlayback } from '../context/PlaybackContext';
-import type { Sentence } from '../types';
+import { useBookmarks } from '../context/BookmarkContext';
 import { groupBookmarks } from '../utils/bookmarks';
 
-interface SentenceActionPopoverProps {
-  visible: boolean;
-  sentence: Sentence | null;
-  anchorY: number;
-  onBookmark: () => void;
-  onAskAi: () => void;
-  onDismiss: () => void;
-}
-
-export function SentenceActionPopover({
-  visible,
-  sentence,
-  anchorY,
-  onBookmark,
-  onAskAi,
-  onDismiss,
-}: SentenceActionPopoverProps) {
-  if (!visible || !sentence) return null;
-
-  return (
-    <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
-      <Pressable style={styles.backdrop} onPress={onDismiss}>
-        <View style={[styles.card, { top: Math.max(anchorY - 72, 96) }]}>
-          <Pressable style={styles.action} onPress={onBookmark}>
-            <Text style={styles.actionText}>Bookmark</Text>
-          </Pressable>
-          <View style={styles.divider} />
-          <Pressable style={styles.action} onPress={onAskAi}>
-            <Text style={styles.actionText}>Ask AI</Text>
-          </Pressable>
-        </View>
-      </Pressable>
-    </Modal>
-  );
-}
 
 interface BookmarksPanelProps {
   visible: boolean;
@@ -54,7 +19,8 @@ interface BookmarksPanelProps {
 }
 
 export function BookmarksPanel({ visible, onClose }: BookmarksPanelProps) {
-  const { book, bookmarks, jumpToBookmark, removeBookmark } = usePlayback();
+  const { book, jumpToBookmark } = usePlayback();
+  const { bookmarks, removeBookmark } = useBookmarks();
   const groups = groupBookmarks(book, bookmarks);
 
   return (

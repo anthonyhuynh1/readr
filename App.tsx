@@ -5,11 +5,18 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { theme } from './src/constants/theme';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { AiProvider } from './src/context/AiContext';
+import { BookmarkProvider } from './src/context/BookmarkContext';
+import { CatalogProvider } from './src/context/CatalogContext';
 import { PlaybackProvider } from './src/context/PlaybackContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { ProgressProvider } from './src/store/ProgressProvider';
 
+/**
+ * AppShell — auth gate that decides whether to show the app or the sign-in screen.
+ * Must be a child of AuthProvider so it can read auth state.
+ */
 function AppShell() {
   const { isSignedIn, isHydrated } = useAuth();
 
@@ -35,14 +42,31 @@ function AppShell() {
   );
 }
 
+/**
+ * Provider tree (outermost → innermost):
+ *   SafeAreaProvider
+ *   → AuthProvider          (session, OTP, dev guest)
+ *     → ProgressProvider    (Reanimated SharedValue for 60fps karaoke clock)
+ *       → CatalogProvider   (book catalog, discovery list)
+ *         → BookmarkProvider (bookmark CRUD, offline-first sync)
+ *           → PlaybackProvider (chapter, audio, session orchestration)
+ *             → AiProvider   (Ask AI sheet state)
+ *               → AppShell
+ */
 export default function App() {
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <AuthProvider>
         <ProgressProvider>
-          <PlaybackProvider>
-            <AppShell />
-          </PlaybackProvider>
+          <CatalogProvider>
+            <BookmarkProvider>
+              <PlaybackProvider>
+                <AiProvider>
+                  <AppShell />
+                </AiProvider>
+              </PlaybackProvider>
+            </BookmarkProvider>
+          </CatalogProvider>
         </ProgressProvider>
       </AuthProvider>
     </SafeAreaProvider>

@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { theme } from '../constants/theme';
@@ -10,7 +10,10 @@ interface KaraokeWordProps {
   /** When true, applies fluid karaoke fill driven by playback progress. */
   isKaraokeActive: boolean;
   trailingSpace: boolean;
-  onPress: () => void;
+  /** Called with the word's window-Y when tapped. */
+  onPress: (anchorY: number) => void;
+  /** Called with the word's window-Y when long-pressed. */
+  onLongPress?: (anchorY: number) => void;
 }
 
 function estimateWordWidth(label: string): number {
@@ -26,7 +29,9 @@ export const KaraokeWord = memo(function KaraokeWord({
   isKaraokeActive,
   trailingSpace,
   onPress,
+  onLongPress,
 }: KaraokeWordProps) {
+  const pressableRef = useRef<View>(null);
   const { progressMs } = usePlaybackProgress();
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const suffix = trailingSpace ? ' ' : '';
@@ -40,11 +45,23 @@ export const KaraokeWord = memo(function KaraokeWord({
     setMeasuredWidth(0);
   }, [word.index, startMs, endMs, word.word]);
 
+  const handlePress = useCallback(() => {
+    pressableRef.current?.measureInWindow((_x, y) => {
+      onPress(y);
+    });
+  }, [onPress]);
+
+  const handleLongPress = useCallback(() => {
+    if (!onLongPress) return;
+    pressableRef.current?.measureInWindow((_x, y) => {
+      onLongPress(y);
+    });
+  }, [onLongPress]);
+
   const clipStyle = useAnimatedStyle(() => {
     if (!isKaraokeActive) {
       return { width: 0 };
     }
-
     const timeMs = progressMs.value;
     let fill = 0;
     if (timeMs >= endMs) {
@@ -53,12 +70,18 @@ export const KaraokeWord = memo(function KaraokeWord({
       const duration = endMs - startMs;
       fill = duration > 0 ? (timeMs - startMs) / duration : 1;
     }
-
     return { width: clipBasisWidth * fill };
   }, [isKaraokeActive, clipBasisWidth, startMs, endMs]);
 
   return (
-    <Pressable onPress={onPress} hitSlop={4} style={styles.hit}>
+    <Pressable
+      ref={pressableRef as React.RefObject<View>}
+      onPress={handlePress}
+      onLongPress={onLongPress ? handleLongPress : undefined}
+      delayLongPress={350}
+      hitSlop={4}
+      style={styles.hit}
+    >
       <View
         style={styles.wordShell}
         onLayout={(event) => {

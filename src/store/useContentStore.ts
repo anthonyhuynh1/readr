@@ -1,56 +1,28 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { hasSupabaseConfig } from '../config/env';
-
-export type TextSource = 'mock-json' | 'legacy-seed' | 'supabase';
-export type CatalogSource = 'openlibrary' | 'local-seed';
 
 const STORAGE_KEY = 'readr.content.sources';
 
-function defaultTextSource(): TextSource {
-  return hasSupabaseConfig() ? 'supabase' : 'mock-json';
-}
-
 interface ContentStore {
-  textSource: TextSource;
-  catalogSource: CatalogSource;
   audioEnabled: boolean;
   readableBookSlugs: string[];
   hydrated: boolean;
-  setTextSource: (source: TextSource) => void;
-  setCatalogSource: (source: CatalogSource) => void;
   setAudioEnabled: (enabled: boolean) => void;
   setReadableBookSlugs: (slugs: string[]) => void;
   hydrate: () => Promise<void>;
 }
 
-async function persist(state: Pick<ContentStore, 'textSource' | 'catalogSource' | 'audioEnabled'>) {
+async function persist(state: Pick<ContentStore, 'audioEnabled'>) {
   await AsyncStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({
-      textSource: state.textSource,
-      catalogSource: state.catalogSource,
-      audioEnabled: state.audioEnabled,
-    }),
+    JSON.stringify({ audioEnabled: state.audioEnabled }),
   );
 }
 
 export const useContentStore = create<ContentStore>((set, get) => ({
-  textSource: defaultTextSource(),
-  catalogSource: 'openlibrary',
-  audioEnabled: false,
+  audioEnabled: true,
   readableBookSlugs: [],
   hydrated: false,
-
-  setTextSource: (textSource) => {
-    set({ textSource });
-    void persist({ ...get(), textSource });
-  },
-
-  setCatalogSource: (catalogSource) => {
-    set({ catalogSource });
-    void persist({ ...get(), catalogSource });
-  },
 
   setAudioEnabled: (audioEnabled) => {
     set({ audioEnabled });
@@ -65,15 +37,9 @@ export const useContentStore = create<ContentStore>((set, get) => ({
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as Partial<{
-          textSource: TextSource;
-          catalogSource: CatalogSource;
-          audioEnabled: boolean;
-        }>;
+        const parsed = JSON.parse(raw) as Partial<{ audioEnabled: boolean }>;
         set({
-          textSource: parsed.textSource ?? defaultTextSource(),
-          catalogSource: parsed.catalogSource ?? 'openlibrary',
-          audioEnabled: parsed.audioEnabled ?? false,
+          audioEnabled: parsed.audioEnabled ?? true,
           hydrated: true,
         });
         return;
@@ -85,16 +51,7 @@ export const useContentStore = create<ContentStore>((set, get) => ({
   },
 }));
 
-/** Non-React access for repository layer. */
-export function getContentSources(): {
-  textSource: TextSource;
-  catalogSource: CatalogSource;
-  audioEnabled: boolean;
-} {
-  const state = useContentStore.getState();
-  return {
-    textSource: state.textSource,
-    catalogSource: state.catalogSource,
-    audioEnabled: state.audioEnabled,
-  };
+/** Non-React access for service layer. */
+export function getContentSources(): { audioEnabled: boolean } {
+  return { audioEnabled: useContentStore.getState().audioEnabled };
 }
