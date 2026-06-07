@@ -42,6 +42,7 @@ const SCROLL_RETRY_MS = 100;
 
 export function ReaderView() {
   const [isUserScrolledAway, setIsUserScrolledAway] = React.useState(false);
+  const [syncDirection, setSyncDirection] = React.useState<'up' | 'down'>('down');
 
   const listRef = useRef<FlashList<Sentence>>(null);
   const forceScrollRef = useRef(false);
@@ -190,11 +191,11 @@ export function ReaderView() {
       sentence_id: selection.sentence.id,
       page_hint: chapter.pageNumber,
       line_index: selection.sentence.index,
-      text_preview: selection.sentence.text,
+      text_preview: getSelectedText(chapter.sentences),
       timestamp_start_ms: selection.word?.start_ms ?? 0,
     });
     clearSelection();
-  }, [selection, userId, addBookmark, book, chapter, clearSelection]);
+  }, [selection, userId, addBookmark, book, chapter, clearSelection, getSelectedText]);
 
   const handleToolbarAskAi = useCallback(() => {
     if (!selection) return;
@@ -277,6 +278,36 @@ export function ReaderView() {
     []
   );
 
+  const handleActiveWordChange = useCallback((sentenceIndex: number, wordIndex: number) => {
+    if (!followMode || isUserScrolledAway || !isImmersive || !isPlaying) return;
+
+    const wLayouts = wordLayoutsRef.current[sentenceIndex];
+    if (!wLayouts) return;
+    const wLayout = wLayouts[wordIndex];
+    if (!wLayout) return;
+
+    let rowY = theme.spacing.xl;
+    for (let i = 0; i < sentenceIndex; i++) {
+      rowY += rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i]);
+    }
+
+    const absoluteY = rowY + theme.spacing.md + wLayout.y;
+    const screenY = absoluteY - scrollYRef.current;
+    const containerHeight = containerHeightRef.current;
+
+    const minSweetSpot = scrollYRef.current < 50 ? 0 : containerHeight * 0.2;
+
+    if (screenY > containerHeight * 0.7 || screenY < minSweetSpot) {
+      const targetOffset = Math.max(0, absoluteY - containerHeight * 0.3);
+      listRef.current?.scrollToOffset({
+        offset: targetOffset,
+        animated: true,
+      });
+      // Important: don't let the sentence-level scroll fight with us
+      forceScrollRef.current = false;
+    }
+  }, [followMode, isUserScrolledAway, isImmersive, isPlaying, chapter.sentences, estimateRowHeight]);
+
   // ── Follow-mode scroll effects ────────────────────────────────────────────
 
   useEffect(() => {
@@ -293,7 +324,10 @@ export function ReaderView() {
       const containerHeight = containerHeightRef.current;
       
       // Sweet spot: between 20% and 70% of the screen height
-      if (screenY >= containerHeight * 0.2 && screenY <= containerHeight * 0.7) {
+      // Exception: If near the absolute top of the document, allow 0% to prevent stuck scrolls
+      const minSweetSpot = scrollYRef.current < 50 ? 0 : containerHeight * 0.2;
+      
+      if (screenY >= minSweetSpot && screenY <= containerHeight * 0.7) {
         return; // It's in the sweet spot, no need to scroll
       }
     }
@@ -334,6 +368,7 @@ export function ReaderView() {
         onWordLongPress={handleWordLongPress}
         selectionRange={selection}
         onWordLayout={handleWordLayout}
+        onActiveWordChange={handleActiveWordChange}
         onLayout={(height) => handleRowLayout(index, height)}
       />
     ),
@@ -379,8 +414,17 @@ export function ReaderView() {
       useNativeDriver: true,
       listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         scrollYRef.current = event.nativeEvent.contentOffset.y;
+        
+        // Dynamically update the sync arrow direction if we're scrolled away
+        if (isUserScrolledAway && isImmersive && isPlaying) {
+          const targetOffset = getEstimatedOffset(activeSentenceIndex);
+          const newDirection = scrollYRef.current > targetOffset ? 'up' : 'down';
+          if (newDirection !== syncDirection) {
+            setSyncDirection(newDirection);
+          }
+        }
       },
-    }
+    },
   );
 
   // Tapping empty space below the last sentence also clears selection.
@@ -413,7 +457,7 @@ export function ReaderView() {
 
       return {
         x: theme.spacing.lg + wLayout.x,
-        y: rowY + wLayout.y,
+        y: rowY + theme.spacing.md + wLayout.y,
         width: wLayout.width,
         height: wLayout.height,
       };
@@ -516,6 +560,7 @@ export function ReaderView() {
 
       <ReturnToSyncBtn
         visible={isUserScrolledAway && isImmersive && isPlaying}
+        direction={syncDirection}
         onPress={() => {
           setIsUserScrolledAway(false);
           forceScrollRef.current = true;

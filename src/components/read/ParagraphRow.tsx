@@ -50,6 +50,7 @@ interface ParagraphRowProps {
   selectionRange: SelectionRange | null;
   /** Callback fired when a WordSpan measures its layout (for drag-to-select math). */
   onWordLayout?: (sentenceIndex: number, wordIndex: number, layout: { x: number; y: number; width: number; height: number }) => void;
+  onActiveWordChange?: (sentenceIndex: number, wordIndex: number) => void;
   onLayout?: (height: number) => void;
 }
 
@@ -190,41 +191,33 @@ const StaticParagraphRow = memo(function StaticParagraphRow({
       onLayout={handleLayout}
     >
       <View style={styles.sentenceRow}>
-        {spans.map((span, si) => {
+        {spans.flatMap((span, si) => {
           const spanWords = wordsForSpan(sentence.words, span);
           const isPastSpan = isActiveSentence && si < activeSpanIndex;
 
-          return (
-            <View key={`${sentence.id}-span-${si}`} style={styles.inlineSpan}>
-              {spanWords.map((word, wi) => {
-                const globalWi = sentence.words.indexOf(word);
-                const trailingSpace = wi < spanWords.length - 1 || si < spans.length - 1;
-                const isSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
+          return spanWords.map((word, wi) => {
+            const globalWi = sentence.words.indexOf(word);
+            const trailingSpace = wi < spanWords.length - 1 || si < spans.length - 1;
+            const isSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
 
-                return (
-                  <WordSpan
-                    key={`${sentence.id}-s${si}-w${word.index}`}
-                    word={word}
-                    trailingSpace={trailingSpace}
-                    isPast={isPastSpan}
-                    isCurrent={isActiveSentence && isImmersive && si === activeSpanIndex}
-                    isSelected={isSelected}
-                    onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
-                    onPress={(anchorY) => {
-                      if (isPlaying) {
-                        onSpanSeek(word.start_ms || span.start_ms);
-                      } else {
-                        onWordLongPress(sentence, globalWi, word, anchorY);
-                      }
-                    }}
-                    onLongPress={(anchorY) =>
-                      onWordLongPress(sentence, globalWi, word, anchorY)
-                    }
-                  />
-                );
-              })}
-            </View>
-          );
+            return (
+              <WordSpan
+                key={`${sentence.id}-s${si}-w${word.index}`}
+                word={word}
+                trailingSpace={trailingSpace}
+                isPast={isPastSpan}
+                isCurrent={isActiveSentence && isImmersive && si === activeSpanIndex}
+                isSelected={isSelected}
+                onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
+                onPress={(anchorY) => {
+                  onSpanSeek(word.start_ms || span.start_ms);
+                }}
+                onLongPress={(anchorY) =>
+                  onWordLongPress(sentence, globalWi, word, anchorY)
+                }
+              />
+            );
+          });
         })}
       </View>
     </View>
@@ -247,6 +240,7 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
   onWordLongPress,
   selectionRange,
   onWordLayout,
+  onActiveWordChange,
   onLayout,
 }: Omit<ParagraphRowProps, 'showWordKaraoke' | 'isActiveSentence'>) {
   const syncTimeMs = useCoarseSyncTime(50);
@@ -268,6 +262,19 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
     [activeSpanWords, syncTimeMs],
   );
 
+  const activeGlobalWi = useMemo(() => {
+    if (!activeSpan) return -1;
+    const word = activeSpanWords[activeWordIndexInSpan];
+    if (!word) return -1;
+    return sentence.words.indexOf(word);
+  }, [activeSpan, activeSpanWords, activeWordIndexInSpan, sentence.words]);
+
+  React.useEffect(() => {
+    if (activeGlobalWi !== -1) {
+      onActiveWordChange?.(sentence.index, activeGlobalWi);
+    }
+  }, [activeGlobalWi, sentence.index, onActiveWordChange]);
+
   const useSolidFallback = activeSpanWords.length > KARAOKE_WORD_SPAN_FALLBACK_THRESHOLD;
   const isKaraokeActive = isImmersive && isPlaying;
 
@@ -282,86 +289,7 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
       sentence.index <= selectionRange.endSentenceIndex
     : false;
 
-  /**
-   * Render a word inside the ACTIVE karaoke span.
-   * Uses KaraokeWord for the current word (fluid fill animation) and plain Pressable
-   * for past/future words. Each has onLongPress for definition lookup.
-   */
-  const renderActiveSpanWord = useCallback(
-    (word: WordTimestamp, wi: number, spanKey: string) => {
-      const trailingSpace = wi < activeSpanWords.length - 1;
-      const isPast = wi < activeWordIndexInSpan;
-      const isCurrent = wi === activeWordIndexInSpan;
-      const globalWi = sentence.words.indexOf(word);
-      const isWordSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
-      
-      const key = `${spanKey}-w-${word.index}`;
-      const handlePress = (anchorY: number) => {
-        if (isPlaying) {
-          onSpanSeek(activeSpan?.start_ms ?? word.start_ms);
-        } else {
-          onWordLongPress(sentence, globalWi, word, anchorY);
-        }
-      };
-      const handleLongPress = (anchorY: number) => {
-        onWordLongPress(sentence, globalWi, word, anchorY);
-      };
 
-      if (isCurrent && useSolidFallback) {
-        return (
-          <View key={key} style={isWordSelected && styles.wordSelected} onLayout={(e) => onWordLayout?.(sentence.index, globalWi, e.nativeEvent.layout)}>
-            <WordSpan
-              word={word}
-              trailingSpace={trailingSpace}
-              isPast={false}
-              isCurrent={false}
-              isSelected={false}
-              onPress={handlePress}
-              onLongPress={handleLongPress}
-            />
-          </View>
-        );
-      }
-
-      if (isCurrent) {
-        return (
-          <View key={key} style={isWordSelected && styles.wordSelected} onLayout={(e) => onWordLayout?.(sentence.index, globalWi, e.nativeEvent.layout)}>
-            <KaraokeWord
-              word={word}
-              isKaraokeActive={isKaraokeActive}
-              trailingSpace={trailingSpace}
-              onPress={handlePress}
-              onLongPress={handleLongPress}
-            />
-          </View>
-        );
-      }
-
-      return (
-        <WordSpan
-          key={key}
-          word={word}
-          trailingSpace={trailingSpace}
-          isPast={isPast}
-          isCurrent={false}
-          isSelected={isWordSelected}
-          onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
-          onPress={handlePress}
-          onLongPress={handleLongPress}
-        />
-      );
-    },
-    [
-      activeSpan,
-      activeSpanWords.length,
-      activeWordIndexInSpan,
-      isKaraokeActive,
-      onSpanSeek,
-      onWordLongPress,
-      sentence,
-      useSolidFallback,
-    ],
-  );
 
   return (
     <View
@@ -374,53 +302,97 @@ const ActiveKaraokeParagraphRow = memo(function ActiveKaraokeParagraphRow({
       onLayout={handleLayout}
     >
       <View style={styles.sentenceRow}>
-        {spans.map((span, si) => {
+        {spans.flatMap((span, si) => {
           if (si === activeSpanIndex) {
             // Active span — render individual karaoke words.
             const spanWords = wordsForSpan(sentence.words, span);
-            return (
-              <View key={`${sentence.id}-karaoke-${si}`} style={styles.inlineSpan}>
-                {spanWords.map((word, wi) =>
-                  renderActiveSpanWord(word, wi, `${sentence.id}-karaoke-${si}`),
-                )}
-              </View>
-            );
+            return spanWords.map((word, wi) => {
+              const isCurrent = wi === activeWordIndexInSpan;
+              const globalWi = sentence.words.indexOf(word);
+              const isWordSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
+              const trailingSpace = wi < spanWords.length - 1 || si < spans.length - 1;
+              const isPast = wi < activeWordIndexInSpan;
+              
+              const key = `${sentence.id}-span-${si}-w-${word.index}`;
+              const handlePress = (anchorY: number) => {
+                onSpanSeek(activeSpan?.start_ms ?? word.start_ms);
+              };
+              const handleLongPress = (anchorY: number) => {
+                onWordLongPress(sentence, globalWi, word, anchorY);
+              };
+
+              if (isCurrent && useSolidFallback) {
+                return (
+                  <View key={key} style={isWordSelected && styles.wordSelected} onLayout={(e) => onWordLayout?.(sentence.index, globalWi, e.nativeEvent.layout)}>
+                    <WordSpan
+                      word={word}
+                      trailingSpace={trailingSpace}
+                      isPast={false}
+                      isCurrent={false}
+                      isSelected={false}
+                      onPress={handlePress}
+                      onLongPress={handleLongPress}
+                    />
+                  </View>
+                );
+              }
+
+              if (isCurrent) {
+                return (
+                  <View key={key} style={isWordSelected && styles.wordSelected} onLayout={(e) => onWordLayout?.(sentence.index, globalWi, e.nativeEvent.layout)}>
+                    <KaraokeWord
+                      word={word}
+                      isKaraokeActive={isKaraokeActive}
+                      trailingSpace={trailingSpace}
+                      onPress={handlePress}
+                      onLongPress={handleLongPress}
+                    />
+                  </View>
+                );
+              }
+
+              return (
+                <WordSpan
+                  key={key}
+                  word={word}
+                  trailingSpace={trailingSpace}
+                  isPast={isPast}
+                  isCurrent={false}
+                  isSelected={isWordSelected}
+                  onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
+                  onPress={handlePress}
+                  onLongPress={handleLongPress}
+                />
+              );
+            });
           }
 
           // Non-active spans — render individual words with long-press.
           const spanWords = wordsForSpan(sentence.words, span);
           const isPastSpan = si < activeSpanIndex;
-          return (
-            <View key={`${sentence.id}-span-${si}`} style={styles.inlineSpan}>
-              {spanWords.map((word, wi) => {
-                const globalWi = sentence.words.indexOf(word);
-                const trailingSpace = wi < spanWords.length - 1 || si < spans.length - 1;
-                const isSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
+          return spanWords.map((word, wi) => {
+            const globalWi = sentence.words.indexOf(word);
+            const trailingSpace = wi < spanWords.length - 1 || si < spans.length - 1;
+            const isSelected = isWordInSelectionRange(sentence.index, globalWi, selectionRange);
 
-                return (
-                  <WordSpan
-                    key={`${sentence.id}-s${si}-w${word.index}`}
-                    word={word}
-                    trailingSpace={trailingSpace}
-                    isPast={isPastSpan}
-                    isCurrent={false}
-                    isSelected={isSelected}
-                    onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
-                    onPress={(anchorY) => {
-                      if (isPlaying) {
-                        onSpanSeek(span.start_ms);
-                      } else {
-                        onWordLongPress(sentence, globalWi, word, anchorY);
-                      }
-                    }}
-                    onLongPress={(anchorY) =>
-                      onWordLongPress(sentence, globalWi, word, anchorY)
-                    }
-                  />
-                );
-              })}
-            </View>
-          );
+            return (
+              <WordSpan
+                key={`${sentence.id}-s${si}-w${word.index}`}
+                word={word}
+                trailingSpace={trailingSpace}
+                isPast={isPastSpan}
+                isCurrent={false}
+                isSelected={isSelected}
+                onWordLayout={(layout) => onWordLayout?.(sentence.index, globalWi, layout)}
+                onPress={(anchorY) => {
+                  onSpanSeek(word.start_ms || span.start_ms);
+                }}
+                onLongPress={(anchorY) =>
+                  onWordLongPress(sentence, globalWi, word, anchorY)
+                }
+              />
+            );
+          });
         })}
       </View>
     </View>
@@ -460,10 +432,6 @@ const styles = StyleSheet.create({
     marginHorizontal: -theme.spacing.sm,
   },
   sentenceRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  inlineSpan: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
