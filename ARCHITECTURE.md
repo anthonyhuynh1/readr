@@ -508,3 +508,10 @@ Vitest config: [vitest.config.ts](vitest.config.ts) — Node environment, [src/t
 ---
 
 *Last aligned with codebase state including: Gatsby ch.1 sync repair (`audio_offset_ms: 22287`), active-sentence-only karaoke, immersive-on-play behavior.*
+
+---
+
+## 8. Important Rules for AI Agents
+1. **Never Break the Virtualization**: Do not alter `FlashList` properties in `ReaderView.tsx` that would force a full re-render of the text list.
+2. **Absolute Y-Coordinates**: When calculating layout coordinates in `ReaderView.tsx` (e.g. for drag handles or autoscroll), always remember to include the paragraph margin (`theme.spacing.lg`) in the height accumulator loops. The `ParagraphRow` layout height does *not* include this margin!
+3. **Context Boundaries**: State has been cleanly separated (Playback, AI, Bookmark, Catalog). If a new feature doesn't strictly need audio playback state, do NOT put it in `PlaybackContext`. Use the appropriate domain context or create a new one.

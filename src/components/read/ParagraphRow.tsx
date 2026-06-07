@@ -151,7 +151,7 @@ const StaticParagraphRow = memo(function StaticParagraphRow({
   sentence,
   isActiveSentence,
   isImmersive,
-  _isPlaying,
+  isPlaying,
   onSpanSeek,
   onWordLongPress,
   selectionRange,
