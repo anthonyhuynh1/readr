@@ -30,6 +30,7 @@ interface SelectionToolbarProps {
   isMultiSentence: boolean;
   onBookmark: () => void;
   onAskAi: () => void;
+  onDefine?: () => void;
   onDismiss: () => void;
 }
 
@@ -39,6 +40,7 @@ export function SelectionToolbar({
   isMultiSentence,
   onBookmark,
   onAskAi,
+  onDefine,
   onDismiss,
 }: SelectionToolbarProps) {
   const scaleAnim = useRef(new Animated.Value(0.88)).current;
@@ -86,6 +88,14 @@ export function SelectionToolbar({
       <ToolbarBtn label="Bookmark" onPress={onBookmark} />
       <View style={styles.divider} />
       <ToolbarBtn label="Ask AI" onPress={onAskAi} />
+      
+      {onDefine && (
+        <>
+          <View style={styles.divider} />
+          <ToolbarBtn label="Define / Translate" onPress={onDefine} />
+        </>
+      )}
+      
       <View style={styles.divider} />
       <ToolbarBtn label="Copy" onPress={handleCopy} />
 

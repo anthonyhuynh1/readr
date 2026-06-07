@@ -70,6 +70,7 @@ export interface UseTextSelectionReturn {
     bookSlug: string;
     chapterSlug: string;
   }) => Promise<void>;
+  defineSelection: () => void;
 }
 
 export function useTextSelection(): UseTextSelectionReturn {
@@ -79,6 +80,20 @@ export function useTextSelection(): UseTextSelectionReturn {
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   const [translationError, setTranslationError] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
+
+  const defineSelection = useCallback(() => {
+    if (!selection) return;
+    // Only support defining single words
+    if (selection.startSentenceIndex !== selection.endSentenceIndex || selection.startWordIndex !== selection.endWordIndex) {
+      return;
+    }
+
+    setIsLoadingDefinition(true);
+    fetchDefinition(selection.word.word)
+      .then((def) => setDefinition(def))
+      .catch(() => setDefinition(null))
+      .finally(() => setIsLoadingDefinition(false));
+  }, [selection]);
 
   const selectWord = useCallback(
     (
@@ -100,11 +115,8 @@ export function useTextSelection(): UseTextSelectionReturn {
         endWordIndex: wordIndex,
       });
 
-      setIsLoadingDefinition(true);
-      fetchDefinition(word.word)
-        .then((def) => setDefinition(def))
-        .catch(() => setDefinition(null))
-        .finally(() => setIsLoadingDefinition(false));
+      setDefinition(null);
+      setIsLoadingDefinition(false);
     },
     [],
   );
@@ -248,5 +260,6 @@ export function useTextSelection(): UseTextSelectionReturn {
     getSelectedText,
     clearSelection,
     translateWord,
+    defineSelection,
   };
 }

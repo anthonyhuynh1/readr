@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as any as typeof FlashList;
 import { theme } from '../constants/theme';
 import { usePlaybackSession } from '../context/PlaybackContext';
@@ -89,6 +89,7 @@ export function ReaderView() {
     getSelectedText,
     clearSelection,
     translateWord,
+    defineSelection,
     updateSelectionRange,
   } = useTextSelection();
 
@@ -215,7 +216,7 @@ export function ReaderView() {
       let offset = 0;
       for (let i = 0; i < index; i++) {
         const sentence = chapter.sentences[i];
-        offset += rowHeightCacheRef.current[i] ?? estimateRowHeight(sentence);
+        offset += (rowHeightCacheRef.current[i] ?? estimateRowHeight(sentence)) + theme.spacing.lg;
       }
       return Math.max(0, offset - containerHeightRef.current * 0.3);
     },
@@ -288,10 +289,10 @@ export function ReaderView() {
 
     let rowY = theme.spacing.xl;
     for (let i = 0; i < sentenceIndex; i++) {
-      rowY += rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i]);
+      rowY += (rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i])) + theme.spacing.lg;
     }
 
-    const absoluteY = rowY + theme.spacing.md + wLayout.y;
+    const absoluteY = rowY + wLayout.y;
     const screenY = absoluteY - scrollYRef.current;
     const containerHeight = containerHeightRef.current;
 
@@ -452,12 +453,12 @@ export function ReaderView() {
 
       let rowY = theme.spacing.xl;
       for (let i = 0; i < sentenceIndex; i++) {
-        rowY += rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i]);
+        rowY += (rowHeightCacheRef.current[i] ?? estimateRowHeight(chapter.sentences[i])) + theme.spacing.lg;
       }
 
       return {
         x: theme.spacing.lg + wLayout.x,
-        y: rowY + theme.spacing.md + wLayout.y,
+        y: rowY + wLayout.y,
         width: wLayout.width,
         height: wLayout.height,
       };
@@ -554,6 +555,7 @@ export function ReaderView() {
           isMultiSentence={isMultiWord}
           onBookmark={handleToolbarBookmark}
           onAskAi={handleToolbarAskAi}
+          onDefine={!isMultiWord ? defineSelection : undefined}
           onDismiss={clearSelection}
         />
       ) : null}
@@ -570,7 +572,11 @@ export function ReaderView() {
 
       {/* Definition card — slides up from bottom of reader area */}
       <DefinitionCard
-        visible={!!selection && !isMultiWord}
+        visible={
+          !!selection &&
+          !isMultiWord &&
+          (isLoadingDefinition || !!definition || isTranslating || !!translatedText || !!translationError)
+        }
         word={selection?.word.word ?? ''}
         definition={definition}
         isLoading={isLoadingDefinition}
