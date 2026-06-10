@@ -8,13 +8,17 @@ Engineering reference for the Readr codebase. Describes what exists, how data mo
 
 ### Core purpose
 
-Readr is a **bimodal reading application**: chapter text displayed in a scrollable reader, optionally synchronized with spoken audio (LibriVox) at **word-level granularity** (karaoke-style highlight). Additional capabilities:
+Readr is a **bimodal reading application**: chapter text displayed in a virtualized reader, optionally synchronized with spoken audio (LibriVox) at **word-level granularity** (karaoke-style highlight). Additional capabilities:
 
-- Cloud bookmarks (sentence-scoped highlights)
+- Cloud bookmarks (sentence-scoped highlights, offline-first)
+- Kindle-style text selection with drag handles
+- Dictionary lookup (Free Dictionary API) + translate
 - Sentence-context Ask AI (OpenAI via Supabase Edge Function)
-- Open Library–sourced catalog metadata with locally seeded readable text
+- Open Library–sourced discovery catalog; **readable text/audio/sync served exclusively from Supabase**
 
-**Production MVP target:** *The Great Gatsby* chapter 1 with real WhisperX word alignment (~5,888 words, 152 sentences). Other books/chapters in the seed catalog use synthetic word timings or empty stubs until aligned.
+**Production MVP target:** *The Great Gatsby* chapter 1 with real WhisperX word alignment (~5,888 words, 152 sentences). Other chapters are not yet aligned; the runtime is fully data-driven so any Supabase-seeded chapter plays without code changes.
+
+> Note: runtime mock/seed content was removed — Supabase is the single source of truth. `src/mocks/mockBook.json` survives only as offline tooling input for the seed + alignment scripts; no `src/` runtime module imports it.
 
 ### Languages and runtimes
 
@@ -57,15 +61,20 @@ From [package.json](package.json):
 expo/AppEntry.js  →  App.tsx  →  providers  →  AppShell  →  NavigationContainer
 ```
 
-There is **no** root `index.tsx`. Expo's entry loads [App.tsx](App.tsx), which mounts:
+There is **no** root `index.tsx`. Expo's entry loads [App.tsx](App.tsx), which mounts (outermost → innermost):
 
 ```tsx
 SafeAreaProvider
-  → AuthProvider
-    → ProgressProvider          // Reanimated SharedValue for playback position
-      → PlaybackProvider        // Session, catalog, chapter, audio, bookmarks, AI
-        → AppShell              // Auth gate → RootNavigator | AuthScreen
+  → AuthProvider              // session, OTP, dev guest
+    → ProgressProvider        // Reanimated SharedValue for 60fps karaoke clock
+      → CatalogProvider       // book catalog + discovery list
+        → BookmarkProvider    // bookmark CRUD, offline-first sync
+          → PlaybackProvider  // chapter, audio, session orchestration
+            → AiProvider      // Ask AI sheet state
+              → AppShell      // Auth gate → RootNavigator | AuthScreen
 ```
+
+State was decomposed out of the former `PlaybackContext` god-context into [CatalogContext](src/context/CatalogContext.tsx), [BookmarkContext](src/context/BookmarkContext.tsx), and [AiContext](src/context/AiContext.tsx).
 
 ---
 
@@ -78,7 +87,7 @@ SafeAreaProvider
 This is not MVC, Clean Architecture, or microservices. The closest label: **feature-oriented layers** with:
 
 - A **facade repository** ([src/services/content/repository.ts](src/services/content/repository.ts)) for all book/chapter I/O
-- A **god-context** ([src/context/PlaybackContext.tsx](src/context/PlaybackContext.tsx)) for playback session orchestration
+- **Domain contexts** — playback session ([PlaybackContext.tsx](src/context/PlaybackContext.tsx)), catalog ([CatalogContext.tsx](src/context/CatalogContext.tsx)), bookmarks ([BookmarkContext.tsx](src/context/BookmarkContext.tsx)), Ask AI ([AiContext.tsx](src/context/AiContext.tsx))
 - **Pure utils** for sync math and chapter transformation
 
 ```mermaid
@@ -109,17 +118,18 @@ flowchart TB
 | Path | Responsibility |
 |------|----------------|
 | [App.tsx](App.tsx) | Root provider tree and auth shell |
-| [src/screens/](src/screens/) | Route-level screens (Home, Explore, Library, Read, Auth, Profile, etc.) |
+| [src/screens/](src/screens/) | Route-level screens (Home, Explore, Library, Community, Read, ReadUnavailable, Auth, Profile) |
 | [src/navigation/](src/navigation/) | React Navigation v7: root stack + five-tab main navigator |
 | [src/components/](src/components/) | Reusable UI; [ReaderView.tsx](src/components/ReaderView.tsx) and [KaraokeWord.tsx](src/components/KaraokeWord.tsx) are sync-critical |
-| [src/context/](src/context/) | [AuthContext.tsx](src/context/AuthContext.tsx), [PlaybackContext.tsx](src/context/PlaybackContext.tsx) (~700 lines) |
-| [src/store/](src/store/) | Zustand stores + [ProgressProvider.tsx](src/store/ProgressProvider.tsx) |
-| [src/services/](src/services/) | I/O boundaries: content, auth, audio, bookmarks, AI, Supabase client |
-| [src/hooks/](src/hooks/) | Composition: `useOpenBook`, `useReadSession`, `useSyncEngine`, `useCoarseSyncTime` |
-| [src/utils/](src/utils/) | Pure logic: sync engine, sync asset transform, chapter builder, karaoke math |
+| [src/components/read/](src/components/read/) | Read-mode UI: selection (`SelectionToolbar`, `SelectionHandle`), `DefinitionCard`, `ParagraphRow`, `ReadModeBar`, `ReturnToSyncBtn`, transport, listen view |
+| [src/context/](src/context/) | [AuthContext](src/context/AuthContext.tsx), [PlaybackContext](src/context/PlaybackContext.tsx) (~551 lines), [CatalogContext](src/context/CatalogContext.tsx), [BookmarkContext](src/context/BookmarkContext.tsx), [AiContext](src/context/AiContext.tsx) |
+| [src/store/](src/store/) | Zustand stores ([useContentStore](src/store/useContentStore.ts), [usePlaybackStore](src/store/usePlaybackStore.ts)) + [ProgressProvider.tsx](src/store/ProgressProvider.tsx) |
+| [src/services/](src/services/) | I/O boundaries: content, auth, audio, bookmarks, AI, dictionary, Supabase client |
+| [src/hooks/](src/hooks/) | Composition: `useOpenBook`, `useReadSession`, `useSyncEngine`, `useCoarseSyncTime`, `useTextSelection`, `useLongPress` |
+| [src/utils/](src/utils/) | Pure logic: sync engine/asset, timeline repair, chapter builder, karaoke math, `paragraphSentences`, `sentenceSync`, `sha256` |
 | [src/types/](src/types/) | Shared TypeScript contracts |
-| [src/mocks/mockBook.json](src/mocks/mockBook.json) | Full Gatsby ch.1 text (152 paragraphs); source for mock-json, seed, and align extract |
-| [src/data/](src/data/) | Static config: theme, book covers, [chapterMediaOverrides.ts](src/data/chapterMediaOverrides.ts) |
+| [src/data/](src/data/) | Static + runtime config: theme, book covers, [bundledSyncAssets.ts](src/data/bundledSyncAssets.ts) (offline fallback), [emptyChapter.ts](src/data/emptyChapter.ts) (neutral initial state) |
+| [src/mocks/mockBook.json](src/mocks/mockBook.json) | Gatsby text; **offline tooling only** — input for seed + align extract, never imported by `src/` runtime |
 | [assets/sync/](assets/sync/) | Committed WhisperX output (Gatsby ch.1: ~535 KB JSON, ~5,888 words) |
 | [assets/align/](assets/align/) | Alignment pipeline sentence input |
 | [assets/audio/](assets/audio/) | LibriVox MP3 (gitignored); demo MP3 may be bundled |
@@ -184,33 +194,34 @@ sequenceDiagram
 
 ### Content source routing
 
-Controlled by [src/store/useContentStore.ts](src/store/useContentStore.ts) — three independent settings persisted to AsyncStorage under `readr.content.sources`:
+Controlled by [src/store/useContentStore.ts](src/store/useContentStore.ts) — persisted to AsyncStorage under `readr.content.sources`:
 
 | Setting | Default | Effect |
 |---------|---------|--------|
-| `catalogSource` | `openlibrary` | Book list metadata from Open Library API |
-| `textSource` | `supabase` if env configured, else `mock-json` | Where chapter text and sync hydration run |
-| `audioEnabled` | `false` | Whether sync timings overlay and audio player load |
+| `audioEnabled` | `true` | Whether the audio player loads (sync/karaoke timings load regardless) |
+| `readableBookSlugs` | from Supabase | Which catalog slugs have seeded readable text |
 
-**Facade:** [src/services/content/repository.ts](src/services/content/repository.ts) routes `fetchChapter` by `textSource`:
+There is **no longer** a `textSource`/`catalogSource` toggle — Supabase is the sole runtime content source.
 
-| `textSource` | Loader | Notes |
-|--------------|--------|-------|
-| `mock-json` | [mockContentService.ts](src/services/content/mockContentService.ts) | [mockBook.json](src/mocks/mockBook.json) only |
-| `supabase` | [supabaseContent.ts](src/services/content/supabaseContent.ts) | Storage JSON + optional sync overlay |
-| `legacy-seed` | [mockChapter.ts](src/data/mockChapter.ts) `seededBooks` | Bundled inline paragraphs |
+**Facade:** [src/services/content/repository.ts](src/services/content/repository.ts):
 
-In-memory chapter cache keyed by `textSource:bookSlug:chapterSlug`.
+| Function | Source | Notes |
+|----------|--------|-------|
+| `fetchChapter` | [supabaseContent.ts](src/services/content/supabaseContent.ts) | Storage text JSON + WhisperX sync overlay; throws `ChapterNotFoundError` if missing |
+| `fetchCatalog` / `fetchBooks` | Open Library (discovery) + Supabase (readable) | Supabase books win on slug collision; OL books are browse-only with empty chapters |
+| `canReadBook` / `refreshReadableBookSlugs` | Supabase `books` | Drives readable badge + Read vs ReadUnavailable |
+
+In-memory chapter cache keyed by `bookSlug:chapterSlug`.
 
 ### Supabase chapter hydration
 
 [src/services/content/supabaseContent.ts](src/services/content/supabaseContent.ts) `hydrateChapterFromSupabase`:
 
-1. **Text (required):** Download `text/{book}/ch-{n}.json` from Storage → [textCache.ts](src/services/sync/textCache.ts) → [textAssetToChapter](src/utils/textAsset.ts) (synthetic placeholder word times)
-2. **Sync (conditional):** If `audioEnabled && sync_hash`, download `sync/{book}/ch-{n}.json` → [cache.ts](src/services/sync/cache.ts) → [syncAssetToChapter](src/utils/syncAsset.ts) (replaces word timings with WhisperX data)
-3. **Offset override:** [resolveAudioOffsetMs](src/data/chapterMediaOverrides.ts) applied client-side without re-seed
+1. **Text (required):** Download `text/{book}/ch-{n}.json` from Storage → [textCache.ts](src/services/sync/textCache.ts) → [textAssetToChapter](src/utils/textAsset.ts) (synthetic placeholder word times). On fetch failure, falls back to cached file then a slug-keyed bundled asset ([bundledSyncAssets.ts](src/data/bundledSyncAssets.ts)).
+2. **Sync (when `sync_hash` present):** Download `sync/{book}/ch-{n}.json` → [cache.ts](src/services/sync/cache.ts) → [syncAssetToChapter](src/utils/syncAsset.ts) (replaces word timings with WhisperX data). This is **independent of `audioEnabled`** so karaoke timings are present even when audio playback is off.
+3. **Offset:** taken directly from the `chapters.audio_offset_ms` DB column (the former client-side override map was removed).
 
-Open Library ([openLibraryService.ts](src/services/openLibrary/openLibraryService.ts)) supplies catalog metadata only. It does **not** provide chapter text. Books without seeded text show [ReadUnavailableScreen](src/screens/ReadUnavailableScreen.tsx).
+Open Library ([openLibraryService.ts](src/services/openLibrary/openLibraryService.ts)) supplies discovery metadata only. It does **not** provide chapter text or chapter lists. Books without seeded text show [ReadUnavailableScreen](src/screens/ReadUnavailableScreen.tsx).
 
 ### Sync asset pipeline (runtime)
 
@@ -252,23 +263,25 @@ Do not conflate these — they exist to separate re-render frequency from UI-thr
 
 | Layer | Mechanism | Holds | Update rate |
 |-------|-----------|-------|-------------|
-| [useContentStore](src/store/useContentStore.ts) | Zustand | Source prefs, readable book slugs | Rare |
-| [usePlaybackStore](src/store/usePlaybackStore.ts) | Zustand | `isPlaying`, `isImmersive`, loading flags, scroll targets, playback rate | User actions |
+| [useContentStore](src/store/useContentStore.ts) | Zustand | `audioEnabled`, readable book slugs | Rare |
+| [usePlaybackStore](src/store/usePlaybackStore.ts) | Zustand | `isPlaying`, `isImmersive`, `activeSentenceIndex`, loading flags, scroll targets, playback rate | User actions |
 | [ProgressProvider](src/store/ProgressProvider.tsx) | Reanimated `SharedValue` | `progressMs` | ~50 ms from audio; read on UI thread by KaraokeWord |
-| [PlaybackContext](src/context/PlaybackContext.tsx) | React Context | `book`, `chapter`, `wordIndex`, bookmarks, AI sheet | On chapter/load actions |
-| `SyncTimeContext` (same file) | React Context | `syncTimeMs` only | 50 ms interval for sentence-level React consumers |
+| [PlaybackContext](src/context/PlaybackContext.tsx) | React Context | `book`, `chapter`, `wordIndex`, transport actions | On chapter/load actions |
+| [CatalogContext](src/context/CatalogContext.tsx) | React Context | `books`, `catalog`, `isLoadingContent` | On catalog refresh |
+| [BookmarkContext](src/context/BookmarkContext.tsx) | React Context | `bookmarks` + CRUD | On bookmark actions |
+| [AiContext](src/context/AiContext.tsx) | React Context | Ask AI sheet state | On AI open/submit |
 
-**PlaybackContext split:** `usePlaybackSession()` excludes `syncTimeMs` so Listen UI avoids ~20 Hz re-renders. `usePlayback()` merges session + `syncTimeMs`. Karaoke word fill uses `progressMs` SharedValue directly — not React state.
+**Coarse React clock:** [useCoarseSyncTime](src/hooks/useCoarseSyncTime.ts) reads `progressMs` on a ~50 ms interval for sentence-level React consumers (e.g. [useSyncEngine](src/hooks/useSyncEngine.ts)). Karaoke word fill uses the `progressMs` SharedValue directly — not React state. There is no separate `SyncTimeContext`. `usePlayback()` is an alias of `usePlaybackSession()`.
 
 **Sync lookup:** [buildWordIndex](src/utils/syncAsset.ts) flattens all words on chapter change. [findActiveWord](src/utils/syncEngine.ts) binary-searches the flat index — O(log n), adequate for ~10k words.
 
 ### Startup (before any book open)
 
-On mount, [PlaybackProvider](src/context/PlaybackContext.tsx):
+On mount:
 
-1. `useContentStore.hydrate()` — load persisted source preferences
-2. `refreshCatalog()` → `reloadCatalog()` → refresh readable slugs + fetch catalog + fetch books
-3. If authenticated, load bookmarks from Supabase
+1. [CatalogProvider](src/context/CatalogContext.tsx) waits for `useContentStore.hydrate()`, then `refreshCatalog()` → `reloadCatalog()` → refresh readable slugs + fetch catalog + fetch books
+2. [BookmarkProvider](src/context/BookmarkContext.tsx) loads bookmarks (local cache, then Supabase sync if authenticated)
+3. [PlaybackProvider](src/context/PlaybackContext.tsx) starts with a neutral [EMPTY_CHAPTER](src/data/emptyChapter.ts) until a book is opened
 
 ---
 
@@ -280,11 +293,11 @@ Files with highest fan-in or complexity — change these with care:
 
 | File | Why it is hot |
 |------|---------------|
-| [src/context/PlaybackContext.tsx](src/context/PlaybackContext.tsx) | Catalog, chapter load, audio, bookmarks, AI, sync clock; large memoized context value |
+| [src/context/PlaybackContext.tsx](src/context/PlaybackContext.tsx) | Chapter load, audio, transport, sync clock, `jumpToBookmark`; large memoized session value |
 | [src/services/content/repository.ts](src/services/content/repository.ts) | All content paths converge here |
+| [src/services/content/supabaseContent.ts](src/services/content/supabaseContent.ts) | Text + sync + audio hydration from Storage/DB |
 | [src/utils/syncAsset.ts](src/utils/syncAsset.ts) + [syncTimelineRepair.ts](src/utils/syncTimelineRepair.ts) | Sync JSON ↔ runtime chapter; intro gap repair |
-| [src/components/ReaderView.tsx](src/components/ReaderView.tsx) | Renders entire chapter; karaoke scoped to active sentence |
-| [src/mocks/mockBook.json](src/mocks/mockBook.json) | Source of truth for Gatsby text in mock, seed, and align extract |
+| [src/components/ReaderView.tsx](src/components/ReaderView.tsx) | FlashList chapter render; karaoke scoped to active sentence; selection/handles geometry |
 
 ### Internal module boundaries
 
@@ -293,7 +306,7 @@ These are not HTTP APIs — they are TypeScript module contracts:
 | Export | Defined in | Consumers | Contract |
 |--------|------------|-----------|----------|
 | `fetchChapter(bookSlug, chapterSlug)` | [repository.ts](src/services/content/repository.ts) | PlaybackContext | `{ book, chapter }` with populated `chapter.sentences[].words[]` |
-| `syncAssetToChapter(asset, meta)` | [syncAsset.ts](src/utils/syncAsset.ts) | repository, supabaseContent, mockContentService | `Chapter` with visual word times |
+| `syncAssetToChapter(asset, meta)` | [syncAsset.ts](src/utils/syncAsset.ts) | supabaseContent | `Chapter` with visual word times |
 | `buildWordIndex(chapter)` | [syncAsset.ts](src/utils/syncAsset.ts) | PlaybackContext | Flat sorted `IndexedWord[]` |
 | `findActiveWord(index, timeMs)` | [syncEngine.ts](src/utils/syncEngine.ts) | [useSyncEngine.ts](src/hooks/useSyncEngine.ts) | Active sentence/word from coarse clock |
 | `chapterAudioPlayer.load/play/seekVisualMs` | [chapterPlayer.ts](src/services/audio/chapterPlayer.ts) | PlaybackContext | Callback-driven visual position |
@@ -366,7 +379,7 @@ Text metadata columns added in [004_text_storage.sql](supabase/migrations/004_te
 
 Document these when extending the system:
 
-1. **Ask AI edge function** ([supabase/functions/ask-ai/index.ts](supabase/functions/ask-ai/index.ts)): No JWT/`auth.uid()` validation. Client sends `requireAuth: true` in [askAi.ts](src/services/ai/askAi.ts) but the edge function does not enforce it. CORS is `Access-Control-Allow-Origin: *`.
+1. **Ask AI edge function** ([supabase/functions/ask-ai/index.ts](supabase/functions/ask-ai/index.ts)): Now validates the bearer JWT via `verifyJwt()` (`supabase.auth.getUser`) and rejects unauthenticated requests (401). CORS remains `Access-Control-Allow-Origin: *`. Residual risk: the client-side `EXPO_PUBLIC_ASK_AI_FALLBACK` stub can mask backend/auth failures (see §6.10).
 2. **Public storage buckets:** Anyone with the URL can fetch audio, sync, and text JSON assets.
 3. **Dev guest in `__DEV__`:** Bypasses real auth even when Supabase is configured ([env.ts](src/config/env.ts)).
 4. **Migration drift:** [002_content_alignment.sql](supabase/migrations/002_content_alignment.sql) references legacy `bookmarks` RLS; the app uses `user_highlights`.
@@ -378,7 +391,7 @@ Document these when extending the system:
 
 ### Architectural debt
 
-1. **Split-source confusion.** Open Library provides catalog metadata only. Readable text requires Supabase seed or `mock-json`. Open Library books without a matching seeded slug navigate to `ReadUnavailable`.
+1. **Split-source confusion.** Open Library provides discovery catalog metadata only. Readable text/audio/sync require a Supabase seed. Open Library books without a matching seeded slug navigate to `ReadUnavailable`.
 
 2. **Two `openBook` functions.** [useOpenBook](src/hooks/useOpenBook.ts) navigates; [PlaybackContext.openBook](src/context/PlaybackContext.tsx) loads content. Debugging "book won't open" vs "chapter won't load" requires knowing which one is failing.
 
@@ -387,14 +400,14 @@ Document these when extending the system:
 4. **WhisperX intro mis-map.** Sentence 0 frequently aligns to the LibriVox spoken disclaimer instead of chapter narration. Requires [repairTimelineGap](src/utils/syncTimelineRepair.ts) and `audio_offset_ms` ~22 s for Gatsby (not the raw WhisperX value of ~341 ms). Repair runs on every `syncAssetToChapter` call and via `npm run repair:sync`.
 
 5. **Karaoke performance ceiling.** Gatsby ch.1 has ~5,888 words across 152 sentences. Mounting a [KaraokeWord](src/components/KaraokeWord.tsx) (dual `Text` layers + Reanimated `useAnimatedStyle`) per word **crashes the app**. Current mitigations in [ReaderView.tsx](src/components/ReaderView.tsx):
-   - Karaoke renders **only on the active sentence**: `karaokeWords={karaokeEnabled && si === activeSentenceIndex}`
-   - `isImmersive` is set on play/word-tap, not on audio load ([PlaybackContext.tsx](src/context/PlaybackContext.tsx) — `setImmersive(true)` only in `seekToWord`; play sets immersive via `usePlaybackStore` `setPlaying`)
+   - Word karaoke renders **only on the active sentence** via `shouldShowWordKaraoke()` ([readerViewUtils.ts](src/utils/readerViewUtils.ts)); a `getItemType` of `'karaoke'` vs static prevents FlashList cell reuse across the two row shapes.
+   - `isImmersive` is set on play/word-tap, not on audio load.
 
-6. **No list virtualization.** [ReaderView](src/components/ReaderView.tsx) uses `ScrollView` mapping all sentences. Layout cost scales linearly with chapter length. `ExploreScreen` uses `FlatList`; the reader does not.
+6. **List virtualization is in place.** [ReaderView](src/components/ReaderView.tsx) now uses `@shopify/flash-list` (`overrideItemLayout`, measured row-height cache, viewability pairs). Heed §8 rules when touching it. (Earlier `ScrollView` debt resolved.)
 
-7. **Weak sync cache hash.** [hashSyncAsset](src/utils/syncAsset.ts) uses a djb2-style string hash with an inline comment to replace with SHA-256. Collision risk is low at current scale but invalidation is not cryptographically sound.
+7. **Sync cache hash.** [sha256.ts](src/utils/sha256.ts) provides SHA-256; `hashSyncAsset` ([syncAsset.ts](src/utils/syncAsset.ts)) uses it for cache invalidation.
 
-8. **Legacy coordinate heuristic.** `usesLegacyAudioWordTimings()` returns true when `firstWord.s >= audio_offset_ms * 0.5`. Brittle if WhisperX output shape changes.
+8. **Legacy coordinate heuristic.** `usesLegacyAudioWordTimings()` / `resolveTimelineCoords()` infer coordinate system from `audio_offset_ms` vs first word. Brittle if WhisperX output shape changes; `normalizeSyncAssetForRuntime()` auto-repairs timeline gaps at load.
 
 9. **CI gap.** [.github/workflows/ci.yml](.github/workflows/ci.yml) runs `typecheck`, `lint`, `test` only. [package.json](package.json) `ci` script also runs `validate:mock-book` and `validate:sync` — those gates are **not** in GitHub Actions.
 
@@ -408,11 +421,11 @@ Document these when extending the system:
 
 | Issue | Location | Impact |
 |-------|----------|--------|
-| God context | PlaybackContext | Any session state change can invalidate large memo; many consumers re-render |
-| ~20 Hz React sync clock | PlaybackContext `syncTimeMs` interval | Sentence highlighting re-renders despite karaoke using SharedValue |
+| Large session memo | PlaybackContext | ~30-field memoized value; session changes can re-render many consumers (catalog/bookmark/AI now split out to reduce this) |
+| ~20 Hz React sync clock | `useCoarseSyncTime` interval | Sentence highlighting re-renders despite karaoke using SharedValue |
 | Deep clone in repair | `JSON.parse(JSON.stringify(asset))` in syncTimelineRepair | Allocates full sync asset on every chapter load |
 | Optimistic sign-out | session.ts + AuthContext | Local state cleared before async Supabase signOut completes |
-| Bundled synthetic sync fallback | getBundledSyncAsset returns chapterToSyncAsset(chapter) | Legacy-seed path never loads committed WhisperX JSON from assets/ |
+| No persistent in-text highlights | ReaderView / ParagraphRow | Saved bookmarks are not re-rendered as highlights; selection styling is transient only |
 
 ### Scaling bottlenecks
 
@@ -420,7 +433,7 @@ Document these when extending the system:
 |----------|----------------------------|-------|
 | Words in chapter | ~5,888 | Active-sentence karaoke ~240 words max; full-chapter karaoke OOM/crash |
 | Sync JSON size | ~535 KB / ~30k lines | Parsed entirely into memory; duplicated on repair clone |
-| Sentences in ScrollView | 152 | All mounted; no windowing |
+| Sentences in FlashList | 152 | Windowed; variable row heights measured + cached |
 | wordIndex array | 5,888 entries | Rebuilt on every chapter object change |
 | Storage cache | Per-chapter filesystem JSON | No LRU eviction; grows with chapters opened |
 
@@ -436,7 +449,7 @@ npm install
 npm run start
 ```
 
-Enable karaoke in the app: Profile screen → toggle **audioEnabled** on.
+Audio is enabled by default; Profile screen has a dev toggle to turn it off. Karaoke timings load from Supabase regardless of the audio toggle.
 
 Full aligned chapter pipeline:
 
@@ -463,9 +476,10 @@ npm run supabase:check         # DB + storage sanity
 | Goal | Start here |
 |------|------------|
 | Book catalog / Explore list | [openLibraryService.ts](src/services/openLibrary/openLibraryService.ts), [ExploreScreen.tsx](src/screens/ExploreScreen.tsx) |
-| Which books are readable | [repository.ts](src/services/content/repository.ts) `canReadBook`, [useContentStore.ts](src/store/useContentStore.ts), Profile toggles |
-| Chapter text loading | [supabaseContent.ts](src/services/content/supabaseContent.ts), [mockContentService.ts](src/services/content/mockContentService.ts) |
-| Karaoke / word highlight | [ReaderView.tsx](src/components/ReaderView.tsx), [KaraokeWord.tsx](src/components/KaraokeWord.tsx), [karaoke.ts](src/utils/karaoke.ts) |
+| Which books are readable | [repository.ts](src/services/content/repository.ts) `canReadBook` / `refreshReadableBookSlugs`, [useContentStore.ts](src/store/useContentStore.ts) |
+| Chapter text loading | [supabaseContent.ts](src/services/content/supabaseContent.ts), [textCache.ts](src/services/sync/textCache.ts) |
+| Karaoke / word highlight | [ReaderView.tsx](src/components/ReaderView.tsx), [KaraokeWord.tsx](src/components/KaraokeWord.tsx), [karaoke.ts](src/utils/karaoke.ts), [readerViewUtils.ts](src/utils/readerViewUtils.ts) |
+| Text selection / dictionary | [useTextSelection.ts](src/hooks/useTextSelection.ts), [SelectionToolbar.tsx](src/components/read/SelectionToolbar.tsx), [DefinitionCard.tsx](src/components/read/DefinitionCard.tsx), [dictionaryService.ts](src/services/dictionary/dictionaryService.ts) |
 | Audio sync / seek / intro skip | [chapterPlayer.ts](src/services/audio/chapterPlayer.ts), [PlaybackContext.tsx](src/context/PlaybackContext.tsx) |
 | Sync JSON format / repair | [syncAsset.ts](src/utils/syncAsset.ts), [syncTimelineRepair.ts](src/utils/syncTimelineRepair.ts), [scripts/alignment/](scripts/alignment/) |
 | New WhisperX-aligned chapter | [COLAB.md](scripts/alignment/whisperx/COLAB.md) → `repair:sync` → `validate:sync` → [supabaseSeed.ts](scripts/seed/supabaseSeed.ts) |
@@ -475,7 +489,7 @@ npm run supabase:check         # DB + storage sanity
 | Ask AI | [PlaybackContext.tsx](src/context/PlaybackContext.tsx) `submitAskAi`, [askAi.ts](src/services/ai/askAi.ts), [ask-ai/index.ts](supabase/functions/ask-ai/index.ts) |
 | Navigation / new screen | [RootNavigator.tsx](src/navigation/RootNavigator.tsx), [types.ts](src/navigation/types.ts) |
 | Env / backend config | [.env.example](.env.example), [env.ts](src/config/env.ts) |
-| Runtime audio offset tuning | [chapterMediaOverrides.ts](src/data/chapterMediaOverrides.ts) (no re-seed required) |
+| Audio offset tuning | `chapters.audio_offset_ms` DB column (re-seed) or `repair:sync` on the committed asset |
 | Database schema | [supabase/migrations/001_init_v2.sql](supabase/migrations/001_init_v2.sql) |
 | Ingest Gatsby EPUB/text | [scripts/ingest/runGatsby.ts](scripts/ingest/runGatsby.ts), [standardEbooks.ts](scripts/ingest/standardEbooks.ts) |
 
@@ -487,12 +501,18 @@ Vitest config: [vitest.config.ts](vitest.config.ts) — Node environment, [src/t
 |-----------|--------|
 | syncEngine.test.ts | `findActiveWord` binary search |
 | syncAsset.test.ts | Legacy vs visual timing normalization |
+| syncAssetReady.test.ts | `syncReady` / runtime normalization |
 | syncTimelineRepair.test.ts | WhisperX gap repair + intro offset |
 | validateSyncAsset.test.ts | Validation rule helpers |
+| sentenceSync.test.ts | Active-sentence resolution |
+| paragraphSentences.test.ts | Grammatical sentence span splitting |
+| readerViewUtils.test.ts | `shouldShowWordKaraoke` gating |
+| karaoke.test.ts | Word fill / active-word math |
+| bundledFallback.test.ts | Offline slug-keyed bundled fallback |
 | emailOtp.test.ts | OTP input validation |
 | bookmarkFlow.test.ts | Bookmark grouping utils |
 
-**Not covered:** AuthContext, PlaybackContext, ReaderView, KaraokeWord, chapterPlayer, Supabase I/O, component/E2E tests.
+**Not covered:** AuthContext, PlaybackContext, CatalogContext, BookmarkContext, AiContext, ReaderView, KaraokeWord, useTextSelection, chapterPlayer, dictionary/Supabase I/O, component/E2E tests.
 
 ### Related documentation
 
@@ -507,7 +527,7 @@ Vitest config: [vitest.config.ts](vitest.config.ts) — Node environment, [src/t
 
 ---
 
-*Last aligned with codebase state including: Gatsby ch.1 sync repair (`audio_offset_ms: 22287`), active-sentence-only karaoke, immersive-on-play behavior.*
+*Last aligned with codebase state including: Supabase-only content (mock/seed runtime removed), context decomposition (Catalog/Bookmark/Ai split from Playback), FlashList virtualized reader, text selection + dictionary, Ask AI JWT validation, and Gatsby ch.1 sync repair (`audio_offset_ms: 22287`).*
 
 ---
 
